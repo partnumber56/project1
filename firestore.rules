@@ -19,6 +19,7 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn() && (
         request.auth.token.email == 'partnumber56@gmail.com' ||
+        request.auth.uid == 'NqZwqd7glkdehH3Jnvqh8HR5Dku2' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
@@ -39,10 +40,14 @@ service cloud.firestore {
 
     function isValidProduct(data) {
       return data.keys().hasAll(['name', 'sku', 'stock', 'price']) &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
-             data.sku is string && data.sku.size() > 0 && data.sku.size() <= 50 &&
-             data.stock is int && data.stock >= 0 &&
-             data.price is number && data.price >= 0;
+             data.name is string && data.name.size() > 0 && data.name.size() <= 400 &&
+             data.sku is string && data.sku.size() > 0 && data.sku.size() <= 100 &&
+             data.stock is number &&
+             data.price is number && data.price >= 0 &&
+             (data.get('brand', '') is string) &&
+             (data.get('supplier', '') is string) &&
+             (data.get('category', '') is string) &&
+             (data.get('description', '') is string);
     }
 
     function isValidOrder(data) {
@@ -51,19 +56,27 @@ service cloud.firestore {
              data.status in ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Request'] &&
              data.totalAmount is number && data.totalAmount >= 0 &&
              data.creatorId == request.auth.uid &&
-             data.createdAt == request.time;
-      // Optional car fields are implicitly allowed unless we add strict schema check here
+             (data.get('totalProfit', 0) is number) &&
+             (data.get('carModel', '') is string) &&
+             (data.get('vin', '') is string) &&
+             (request.method == 'create' ? data.createdAt == request.time : true);
     }
 
     function isValidOrderItem(data) {
-      return data.keys().hasAll(['partNumber', 'productName', 'quantity', 'costPrice', 'sellingPrice', 'status']) &&
+      return data.keys().hasAll(['partNumber', 'productName', 'quantity', 'status']) &&
              data.partNumber is string &&
              data.productName is string &&
              (data.get('brand', '') is string) &&
-             data.quantity is int && data.quantity > 0 &&
-             data.costPrice is number &&
-             data.sellingPrice is number &&
+             (data.get('supplier', '') is string) &&
+             (data.get('deliveryTime', '') is string) &&
+             data.quantity is number && data.quantity > 0 &&
+             (data.get('costPrice', 0) is number || data.get('costPrice', '') == '') &&
+             (data.get('sellingPrice', 0) is number || data.get('sellingPrice', '') == '') &&
              data.status in ['Pending', 'Ordered', 'Available', 'Out of Stock', 'Picked', 'Packed', 'Issued'];
+    }
+
+    match /{path=**}/items/{itemId} {
+      allow read: if isSignedIn();
     }
 
     function isValidClient(data) {
@@ -95,7 +108,7 @@ service cloud.firestore {
 
     match /products/{productId} {
       allow read: if isSignedIn();
-      allow create, update: if isSignedIn() && isValidProduct(incoming());
+      allow create, update: if isSignedIn() && (isValidProduct(incoming()) || isAdmin());
       allow delete: if isAdmin();
     }
 
@@ -103,15 +116,26 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && isValidOrder(incoming());
       allow update: if isSignedIn() && (
-        (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'customerName', 'customerEmail', 'totalAmount']) && 
-         incoming().updatedAt == request.time) ||
+        (incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'updatedAt', 'customerName', 'customerPhone', 'customerEmail', 
+          'totalAmount', 'totalProfit', 'clientId', 'isFinancialProcessed',
+          'carModel', 'vin', 'carYear', 'engineVolume'
+        ]) && incoming().updatedAt == request.time) ||
         isAdmin()
       );
       allow delete: if isAdmin();
 
       match /items/{itemId} {
         allow read: if isSignedIn();
-        allow create, update: if isSignedIn() && isValidOrderItem(incoming());
+        allow create: if isSignedIn() && (isValidOrderItem(incoming()) || isAdmin());
+        allow update: if isSignedIn() && (isAdmin() || (
+          isValidOrderItem(incoming()) && 
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'productName', 'partNumber', 'brand', 'quantity', 'costPrice', 
+            'sellingPrice', 'supplier', 'status', 'updatedAt', 'deliveryTime',
+            'orderDate', 'customerName', 'parentOrderId'
+          ])
+        ));
         allow delete: if isSignedIn();
       }
     }
@@ -129,6 +153,11 @@ service cloud.firestore {
       }
     }
 
+    function isValidCar(data) {
+      return data.keys().hasAll(['model']) &&
+             data.model is string && data.model.size() > 0;
+    }
+
     match /clients/{clientId} {
       allow read: if isSignedIn();
       allow create, update: if isSignedIn() && isValidClient(incoming());
@@ -138,6 +167,12 @@ service cloud.firestore {
         allow read: if isSignedIn();
         allow create: if isSignedIn() && isValidFinancialTransaction(incoming());
         allow write: if false;
+      }
+
+      match /cars/{carId} {
+        allow read: if isSignedIn();
+        allow create, update: if isSignedIn() && isValidCar(incoming());
+        allow delete: if isSignedIn();
       }
     }
 

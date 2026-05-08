@@ -1,4 +1,4 @@
-import { useEffect, useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent, useRef, ChangeEvent } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { 
   collection, 
@@ -7,7 +7,8 @@ import {
   updateDoc, 
   deleteDoc, 
   doc, 
-  serverTimestamp 
+  serverTimestamp,
+  writeBatch
 } from 'firebase/firestore';
 import { 
   Plus, 
@@ -20,8 +21,11 @@ import {
   Layers,
   Tag,
   DollarSign,
-  X
+  X,
+  Upload,
+  FileSpreadsheet
 } from 'lucide-react';
+import { read, utils } from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product } from '../types';
 import { cn, formatCurrency } from '../lib/utils';
@@ -29,16 +33,21 @@ import { cn, formatCurrency } from '../lib/utils';
 export default function InventoryView() {
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [supplierFilter, setSupplierFilter] = useState('All');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     sku: '',
     brand: '',
-    stock: 0,
-    price: 0,
+    supplier: '',
+    stock: '' as string | number,
+    price: '' as string | number,
     category: '',
-    description: ''
+    description: '',
+    deliveryTime: ''
   });
 
   useEffect(() => {
@@ -48,10 +57,20 @@ export default function InventoryView() {
     return () => unsubscribe();
   }, []);
 
-  const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    p.sku.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const suppliers = ['All', ...new Set(products.map(p => p.supplier).filter(Boolean) as string[])];
+
+  const filteredProducts = products.filter(p => {
+    const nameStr = (p.name || '').toLowerCase();
+    const skuStr = (p.sku || '').toLowerCase();
+    const searchTermLower = searchTerm.toLowerCase();
+    
+    const matchesSearch = nameStr.includes(searchTermLower) || skuStr.includes(searchTermLower);
+    const matchesSupplier = supplierFilter === 'All' || p.supplier === supplierFilter;
+    return matchesSearch && matchesSupplier;
+  }).sort((a, b) => {
+    // Sort by name if no createdAt
+    return (a.name || '').localeCompare(b.name || '');
+  });
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -73,7 +92,7 @@ export default function InventoryView() {
       }
       setIsModalOpen(false);
       setEditingProduct(null);
-      setFormData({ name: '', sku: '', brand: '', stock: 0, price: 0, category: '', description: '' });
+      setFormData({ name: '', sku: '', brand: '', supplier: '', stock: '', price: '', category: '', description: '' });
     } catch (error) {
       handleFirestoreError(error, editingProduct ? OperationType.UPDATE : OperationType.CREATE, path);
     }
@@ -95,38 +114,143 @@ export default function InventoryView() {
       name: product.name,
       sku: product.sku,
       brand: product.brand || '',
+      supplier: product.supplier || '',
       stock: product.stock,
       price: product.price,
       category: product.category || '',
-      description: product.description || ''
+      description: product.description || '',
+      deliveryTime: product.deliveryTime || ''
     });
     setIsModalOpen(true);
+  };
+
+  const handleImportExcel = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    const reader = new FileReader();
+
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = utils.sheet_to_json(ws);
+
+        if (data.length === 0) {
+          alert('Файл порожній');
+          setIsImporting(false);
+          return;
+        }
+
+        const batch = writeBatch(db);
+        const productsCol = collection(db, 'products');
+
+        data.forEach((row: any) => {
+          // Flexible mapping
+          const name = row['Назва'] || row['Name'] || row['productName'] || row['Товар'];
+          const sku = row['SKU'] || row['Артикул'] || row['sku'] || row['Код'];
+          const stock = Number(row['Кількість'] || row['Stock'] || row['stock'] || row['Залишок'] || 0);
+          const price = Number(row['Ціна'] || row['Price'] || row['price'] || row['Вартість'] || 0);
+          const brand = row['Бренд'] || row['Brand'] || row['brand'] || row['Виробник'] || '';
+          const supplier = row['Постачальник'] || row['Supplier'] || row['supplier'] || '';
+          const category = row['Категорія'] || row['Category'] || row['category'] || '';
+          const description = row['Опис'] || row['Description'] || row['description'] || '';
+
+          if (name && sku) {
+            const newDocRef = doc(productsCol);
+            batch.set(newDocRef, {
+              name,
+              sku,
+              stock,
+              price,
+              brand,
+              supplier,
+              category,
+              description,
+              createdAt: serverTimestamp()
+            });
+          }
+        });
+
+        await batch.commit();
+        alert(`Успішно імпортовано ${data.length} товарів`);
+      } catch (error) {
+        console.error('Excel Import Error:', error);
+        alert('Помилка при імпорті Excel. Перевірте формат файлу.');
+      } finally {
+        setIsImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+
+    reader.readAsBinaryString(file);
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="relative group flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-          <input 
-            type="text" 
-            placeholder="Пошук по назві або SKU..." 
-            className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50/50 transition-all"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+        <div className="flex flex-1 flex-col sm:flex-row gap-4 max-w-2xl">
+          <div className="relative group flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+            <input 
+              type="text" 
+              placeholder="Пошук по назві або SKU..." 
+              className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50/50 transition-all"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          
+          <div className="w-full sm:w-48 bg-white border border-slate-200 rounded-xl px-4 flex items-center gap-2 group focus-within:border-blue-500 transition-all">
+            <Layers className="w-4 h-4 text-slate-400" />
+            <select 
+              value={supplierFilter}
+              onChange={(e) => setSupplierFilter(e.target.value)}
+              className="w-full py-2 outline-none text-sm font-medium bg-transparent cursor-pointer"
+            >
+              {suppliers.map(s => (
+                <option key={s} value={s}>{s === 'All' ? 'Всі постачальники' : s}</option>
+              ))}
+            </select>
+          </div>
         </div>
-        <button 
-          onClick={() => {
-            setEditingProduct(null);
-            setFormData({ name: '', sku: '', stock: 0, price: 0, category: '', description: '' });
-            setIsModalOpen(true);
-          }}
-          className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-xl shadow-lg shadow-blue-900/10 active:scale-95 transition-all"
-        >
-          <Plus className="w-5 h-5" />
-          Додати товар
-        </button>
+        
+        <div className="flex items-center gap-3">
+          <input 
+            type="file" 
+            ref={fileInputRef}
+            onChange={handleImportExcel}
+            accept=".xlsx, .xls, .csv"
+            className="hidden"
+          />
+          <button 
+            disabled={isImporting}
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-slate-700 font-semibold py-2 px-6 rounded-xl border border-slate-200 shadow-sm active:scale-95 transition-all whitespace-nowrap disabled:opacity-50"
+          >
+            {isImporting ? (
+              <div className="w-5 h-5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+            ) : (
+              <FileSpreadsheet className="w-5 h-5 text-emerald-500" />
+            )}
+            Імпорт Excel
+          </button>
+          
+          <button 
+            onClick={() => {
+              setEditingProduct(null);
+              setFormData({ name: '', sku: '', brand: '', supplier: '', stock: '', price: '', category: '', description: '' });
+              setIsModalOpen(true);
+            }}
+            className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-xl shadow-lg shadow-blue-900/10 active:scale-95 transition-all whitespace-nowrap"
+          >
+            <Plus className="w-5 h-5" />
+            Додати товар
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -137,6 +261,7 @@ export default function InventoryView() {
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Товар</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">SKU</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Категорія</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Срок</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Наявність</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Ціна</th>
                 <th className="px-6 py-4 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Дії</th>
@@ -155,24 +280,21 @@ export default function InventoryView() {
                   </td>
                   <td className="px-6 py-4">
                     <span className="font-mono text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">{product.sku}</span>
-                    {product.brand && <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">{product.brand}</p>}
+                    <div className="flex flex-col gap-0.5 mt-1">
+                      {product.brand && <p className="text-[10px] text-slate-400 uppercase font-black tracking-tighter">{product.brand}</p>}
+                      {product.supplier && <p className="text-[10px] text-blue-500 uppercase font-black tracking-tighter">{product.supplier}</p>}
+                    </div>
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-sm text-slate-600">{product.category || 'Без категорії'}</span>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <span className={cn(
-                        "text-sm font-bold",
-                        product.stock <= 0 ? "text-rose-600" : 
-                        product.stock < 10 ? "text-amber-600" : "text-emerald-600"
-                      )}>
-                        {product.stock} шт
-                      </span>
-                      {product.stock < 10 && (
-                        <AlertTriangle className="w-4 h-4 text-amber-500" />
-                      )}
-                    </div>
+                    <span className="text-xs font-bold text-blue-600 uppercase italic">{product.deliveryTime || 'н/д'}</span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className="text-sm font-bold text-slate-900">
+                      {product.stock} шт
+                    </span>
                   </td>
                   <td className="px-6 py-4 text-sm font-bold text-slate-800">
                     {formatCurrency(product.price)}
@@ -264,6 +386,15 @@ export default function InventoryView() {
                     />
                   </div>
                   <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">Постачальник</label>
+                    <input 
+                      type="text" 
+                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-all text-sm"
+                      value={formData.supplier}
+                      onChange={(e) => setFormData({ ...formData, supplier: e.target.value })}
+                    />
+                  </div>
+                  <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">Категорія</label>
                     <input 
                       type="text" 
@@ -278,9 +409,9 @@ export default function InventoryView() {
                       required
                       type="number" 
                       step="0.01"
-                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-all"
-                      value={formData.price}
-                      onChange={(e) => setFormData({ ...formData, price: Number(e.target.value) })}
+                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-all font-sans"
+                      value={formData.price === 0 ? '' : formData.price}
+                      onChange={(e) => setFormData({ ...formData, price: e.target.value === '' ? 0 : Number(e.target.value) })}
                     />
                   </div>
                   <div>
@@ -289,8 +420,18 @@ export default function InventoryView() {
                       required
                       type="number" 
                       className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-all"
-                      value={formData.stock}
-                      onChange={(e) => setFormData({ ...formData, stock: Number(e.target.value) })}
+                      value={formData.stock === 0 ? '' : formData.stock}
+                      onChange={(e) => setFormData({ ...formData, stock: e.target.value === '' ? 0 : Number(e.target.value) })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-1">Срок поставки</label>
+                    <input 
+                      type="text" 
+                      placeholder="напр. 1-2 дні"
+                      className="w-full px-4 py-2 border border-slate-200 rounded-xl outline-none focus:border-blue-500 transition-all uppercase text-sm font-bold text-blue-600"
+                      value={formData.deliveryTime}
+                      onChange={(e) => setFormData({ ...formData, deliveryTime: e.target.value })}
                     />
                   </div>
                 </div>

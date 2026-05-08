@@ -43,18 +43,29 @@ export default function OrdersView() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsub = onSnapshot(collection(db, 'orders'), (snapshot) => {
       setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'orders');
     });
-    return () => unsubscribe();
+    return () => unsub();
   }, []);
 
   const filteredOrders = orders.filter(o => {
-    const matchesSearch = o.customerName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                         o.id.toLowerCase().includes(searchTerm.toLowerCase());
+    const customerName = (o.customerName || '').toLowerCase();
+    const orderId = (o.id || '').toLowerCase();
+    const phone = (o.customerPhone || '').toLowerCase();
+    const searchTermLower = searchTerm.toLowerCase();
+    
+    const matchesSearch = customerName.includes(searchTermLower) || 
+                         orderId.includes(searchTermLower) ||
+                         phone.includes(searchTermLower);
     const matchesFilter = filterStatus === 'All' || o.status === filterStatus;
     return matchesSearch && matchesFilter;
+  }).sort((a, b) => {
+    const timeA = a.createdAt?.toMillis() || 0;
+    const timeB = b.createdAt?.toMillis() || 0;
+    return timeB - timeA;
   });
 
   const getStatusIcon = (status: OrderStatus) => {
@@ -86,7 +97,7 @@ export default function OrdersView() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input 
               type="text" 
-              placeholder="Шукати за ім'ям або ID..." 
+              placeholder="Ім'я, телефон або ID..." 
               className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -142,16 +153,23 @@ export default function OrdersView() {
                 <span className="text-xs text-slate-400 font-mono">#{order.id.slice(0, 8)}</span>
               </div>
 
-              <div className="flex items-center gap-4 mb-4">
+                  <div className="flex items-center gap-4 mb-4">
                 <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center shrink-0">
                   <User className="w-6 h-6 text-slate-400" />
                 </div>
                 <div>
                   <h4 className="font-bold text-slate-800 line-clamp-1">{order.customerName}</h4>
                   <p className="text-xs text-slate-500 font-medium">{order.carModel || 'Авто не вказано'}</p>
-                  <div className="flex items-center gap-1 text-[11px] text-slate-400 font-bold uppercase tracking-wider mt-1">
-                    <Calendar className="w-3 h-3" />
-                    {order.createdAt?.toDate ? order.createdAt.toDate().toLocaleDateString('uk-UA') : 'Сьогодні'}
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-1 text-[11px] text-slate-400 font-bold uppercase tracking-wider">
+                      <Calendar className="w-3 h-3" />
+                      {order.createdAt?.toDate ? order.createdAt.toDate().toLocaleDateString('uk-UA') : 'Сьогодні'}
+                    </div>
+                    <div className="w-1 h-1 rounded-full bg-slate-200" />
+                    <div className="flex items-center gap-1 text-[11px] text-slate-400 font-bold uppercase tracking-wider">
+                      <Clock className="w-3 h-3" />
+                      {order.createdAt?.toDate ? order.createdAt.toDate().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }) : '-'}
+                    </div>
                   </div>
                 </div>
               </div>

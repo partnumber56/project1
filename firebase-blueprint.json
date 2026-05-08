@@ -71,6 +71,18 @@
       },
       "required": ["name", "balance", "totalTurnover", "createdAt"]
     },
+    "Car": {
+      "title": "Car",
+      "description": "Vehicle associated with a client",
+      "type": "object",
+      "properties": {
+        "model": { "type": "string" },
+        "vin": { "type": "string" },
+        "year": { "type": "string" },
+        "engineVolume": { "type": "string" }
+      },
+      "required": ["model"]
+    },
     "FinancialTransaction": {
       "title": "FinancialTransaction",
       "description": "A single financial movement (payment, order charge, or refund)",
@@ -127,6 +139,10 @@
     "/clients/{clientId}/transactions/{txId}": {
       "schema": "FinancialTransaction",
       "description": "Financial history for a client"
+    },
+    "/clients/{clientId}/cars/{carId}": {
+      "schema": "Car",
+      "description": "Vehicles owned by the client"
     },
     "/notifications/{notifId}": {
       "schema": "Notification",

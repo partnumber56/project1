@@ -21,7 +21,8 @@ import {
   History,
   TrendingUp,
   AlertCircle,
-  XCircle
+  XCircle,
+  Phone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Client, FinancialTransaction } from '../types';
@@ -33,16 +34,21 @@ export default function FinanceView() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddTransactionOpen, setIsAddTransactionOpen] = useState(false);
+  const [isAddClientOpen, setIsAddClientOpen] = useState(false);
+  const [newClientName, setNewClientName] = useState('');
+  const [newClientPhone, setNewClientPhone] = useState('');
+  const [isAddingClient, setIsAddingClient] = useState(false);
   const [txType, setTxType] = useState<'Payment' | 'Refund' | 'Adjustment'>('Payment');
   const [txAmount, setTxAmount] = useState<string>('');
   const [txDesc, setTxDesc] = useState('');
 
   useEffect(() => {
-    const q = query(collection(db, 'clients'), orderBy('name', 'asc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsub = onSnapshot(collection(db, 'clients'), (snapshot) => {
       setClients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'clients');
     });
-    return () => unsubscribe();
+    return () => unsub();
   }, []);
 
   useEffect(() => {
@@ -56,14 +62,18 @@ export default function FinanceView() {
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinancialTransaction)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `clients/${selectedClient?.id}/transactions`);
     });
     return () => unsubscribe();
   }, [selectedClient]);
 
-  const filteredClients = clients.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.phone?.includes(searchTerm)
-  );
+  const filteredClients = clients.filter(c => {
+    const name = (c.name || '').toLowerCase();
+    const phone = (c.phone || '').toLowerCase();
+    const searchTermLower = searchTerm.toLowerCase();
+    return name.includes(searchTermLower) || phone.includes(searchTermLower);
+  }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
   const handleAddTransaction = async () => {
     if (!selectedClient || !txAmount || isNaN(parseFloat(txAmount))) return;
@@ -111,18 +121,24 @@ export default function FinanceView() {
     }
   };
 
-  const createClient = async () => {
-    const name = prompt('Введіть ПІБ клієнта:');
-    if (!name) return;
+  const handleCreateClient = async () => {
+    if (!newClientName) return;
+    setIsAddingClient(true);
     try {
       await addDoc(collection(db, 'clients'), {
-        name,
+        name: newClientName,
+        phone: newClientPhone,
         balance: 0,
         totalTurnover: 0,
         createdAt: serverTimestamp()
       });
+      setIsAddClientOpen(false);
+      setNewClientName('');
+      setNewClientPhone('');
     } catch (error) {
-       handleFirestoreError(error, OperationType.CREATE, 'clients');
+      handleFirestoreError(error, OperationType.CREATE, 'clients');
+    } finally {
+      setIsAddingClient(false);
     }
   };
 
@@ -136,7 +152,7 @@ export default function FinanceView() {
               <Users className="w-5 h-5 text-blue-500" />
               Клієнти
             </h3>
-            <button onClick={createClient} className="p-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all">
+            <button onClick={() => setIsAddClientOpen(true)} className="p-2 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all">
               <Plus className="w-5 h-5" />
             </button>
           </div>
@@ -145,7 +161,7 @@ export default function FinanceView() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input 
               type="text" 
-              placeholder="Пошук клієнта..." 
+              placeholder="Пошук за ім'ям або телефоном..." 
               className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-xl outline-none focus:border-blue-500 text-sm"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -172,6 +188,7 @@ export default function FinanceView() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-bold text-slate-800 line-clamp-1">{client.name}</p>
+                  <p className="text-[10px] text-slate-400 font-bold">{client.phone || 'Немає тел.'}</p>
                   <p className={cn(
                     "text-xs font-black mt-1",
                     client.balance >= 0 ? "text-emerald-500" : "text-rose-500"
@@ -189,6 +206,15 @@ export default function FinanceView() {
       <div className="xl:col-span-8 h-full">
         {selectedClient ? (
           <div className="flex flex-col gap-8 h-full">
+            <div className="flex items-center justify-between items-end">
+              <div>
+                <h2 className="text-3xl font-black text-slate-900 mb-1">{selectedClient.name}</h2>
+                <div className="flex items-center gap-4 text-slate-500 font-bold text-sm">
+                  <span className="flex items-center gap-1"><Phone className="w-4 h-4 text-slate-400" /> {selectedClient.phone || '–'}</span>
+                </div>
+              </div>
+            </div>
+
             {/* Header Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 shrink-0">
               <div className="bg-slate-900 rounded-3xl p-6 text-white shadow-xl shadow-slate-900/10">
@@ -289,6 +315,66 @@ export default function FinanceView() {
           </div>
         )}
       </div>
+
+      {/* Add Client Modal */}
+      <AnimatePresence>
+        {isAddClientOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsAddClientOpen(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl p-8"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-xl font-black text-slate-800">Новий клієнт</h3>
+                <button onClick={() => setIsAddClientOpen(false)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                  <XCircle className="w-6 h-6 text-slate-400" />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">ПІБ Клієнта *</label>
+                  <input 
+                    type="text"
+                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-blue-500 transition-all text-sm font-bold"
+                    placeholder="Іван Іванов"
+                    value={newClientName}
+                    onChange={(e) => setNewClientName(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block">Телефон</label>
+                  <input 
+                    type="text"
+                    className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-blue-500 transition-all text-sm"
+                    placeholder="+380..."
+                    value={newClientPhone}
+                    onChange={(e) => setNewClientPhone(e.target.value)}
+                  />
+                </div>
+
+                <button 
+                  onClick={handleCreateClient}
+                  disabled={!newClientName || isAddingClient}
+                  className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-500/20 hover:bg-blue-700 transition-all active:scale-[0.98] disabled:opacity-50 mt-4"
+                >
+                  {isAddingClient ? 'СТВОРЕННЯ...' : 'ЗБЕРЕГТИ КЛІЄНТА'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Add Transaction Modal */}
       <AnimatePresence>

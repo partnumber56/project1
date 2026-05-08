@@ -8,6 +8,7 @@ export interface Product {
   name: string;
   sku: string;
   brand?: string;
+  supplier?: string;
   stock: number;
   price: number;
   category: string;
@@ -17,6 +18,7 @@ export interface Product {
 
 export interface Order {
   id: string;
+  clientId?: string;
   customerName: string;
   customerEmail?: string;
   customerPhone?: string;
@@ -27,6 +29,7 @@ export interface Order {
   status: OrderStatus;
   totalAmount: number;
   totalProfit?: number;
+  isFinancialProcessed?: boolean;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
   creatorId: string;
@@ -42,6 +45,7 @@ export interface OrderItem {
   costPrice: number;
   sellingPrice: number;
   supplier?: string;
+  deliveryTime?: string;
   status: ItemStatus;
 }
 
@@ -52,6 +56,14 @@ export interface Notification {
   type: 'info' | 'success' | 'warning' | 'error';
   read: boolean;
   createdAt: Timestamp;
+}
+
+export interface Car {
+  id: string;
+  model: string;
+  vin?: string;
+  year?: string;
+  engineVolume?: string;
 }
 
 export interface Client {

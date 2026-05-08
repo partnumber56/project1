@@ -85,7 +85,7 @@ export default function DashboardView() {
       setProducts(productData);
       setStats(prev => ({
         ...prev,
-        lowStockCount: productData.filter(p => p.stock < 10).length
+        lowStockCount: productData.filter(p => (p.stock || 0) <= 5).length
       }));
     });
 
@@ -110,7 +110,7 @@ export default function DashboardView() {
         <StatCard 
           title="Прибуток" 
           value={formatCurrency(stats.totalProfit)} 
-          change="+8.2%" 
+          change={`${stats.totalSales > 0 ? (stats.totalProfit / stats.totalSales * 100).toFixed(1) : 0}% ROI`} 
           trend="up" 
           icon={<DollarSign className="w-5 h-5 text-blue-600" />}
           bgColor="bg-blue-50"
@@ -118,18 +118,18 @@ export default function DashboardView() {
         <StatCard 
           title="Очікують" 
           value={stats.pendingOrders.toString()} 
-          change="Потребують уваги" 
+          change="Замовлення" 
           trend="neutral" 
           icon={<AlertCircle className="w-5 h-5 text-amber-600" />}
           bgColor="bg-amber-50"
         />
         <StatCard 
-          title="Низький запас" 
-          value={stats.lowStockCount.toString()} 
-          change="Товари < 10 шт" 
-          trend="down" 
-          icon={<Package className="w-5 h-5 text-rose-600" />}
-          bgColor="bg-rose-50"
+          title="Всього замовлень" 
+          value={orders.length.toString()} 
+          change="Активні" 
+          trend="neutral" 
+          icon={<Package className="w-5 h-5 text-indigo-600" />}
+          bgColor="bg-indigo-50"
         />
       </div>
 
@@ -208,14 +208,18 @@ export default function DashboardView() {
                       order.status === 'Cancelled' ? 'text-rose-600' : 'text-blue-600'
                     )} />
                   </div>
-                  <div>
-                    <p className="text-sm font-bold text-slate-800 truncate max-w-[120px]">{order.customerName}</p>
-                    <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">{order.status}</p>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-slate-800 truncate">{order.customerName}</p>
+                    <div className="flex items-center gap-2">
+                       <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">{order.status}</p>
+                       <span className="text-[10px] text-slate-300">•</span>
+                       <p className="text-[10px] text-slate-400 font-bold">{order.createdAt?.toDate ? order.createdAt.toDate().toLocaleDateString('uk-UA') : ''}</p>
+                    </div>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-bold text-slate-800">{formatCurrency(order.totalAmount)}</p>
-                  <ChevronRight className="w-4 h-4 text-slate-300 ml-auto group-hover:text-blue-500 transition-colors" />
+                  <p className="text-sm font-black text-slate-900 leading-none mb-1">{formatCurrency(order.totalAmount)}</p>
+                  <p className="text-[9px] font-bold text-emerald-600">+{formatCurrency(order.totalProfit || 0)}</p>
                 </div>
               </div>
             ))}

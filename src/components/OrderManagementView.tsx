@@ -33,6 +33,40 @@ interface OrderItemWithContext extends OrderItem {
   orderDate?: any;
 }
 
+interface EditableInputProps {
+  value: string | number;
+  onSave: (val: string) => void;
+  type?: 'text' | 'number';
+  placeholder?: string;
+  className?: string;
+}
+
+function EditableInput({ value, onSave, type = 'text', placeholder, className }: EditableInputProps) {
+  const [localValue, setLocalValue] = useState(String(value === 0 && type === 'number' ? '' : value));
+  
+  useEffect(() => {
+    setLocalValue(String(value === 0 && type === 'number' ? '' : value));
+  }, [value, type]);
+
+  return (
+    <input
+      type={type}
+      value={localValue}
+      onChange={(e) => setLocalValue(e.target.value)}
+      onBlur={() => {
+        if (String(localValue) !== String(value)) {
+          onSave(localValue);
+        }
+      }}
+      placeholder={placeholder}
+      className={cn(
+        "bg-transparent outline-none focus:ring-1 focus:ring-blue-100 px-1 rounded",
+        className
+      )}
+    />
+  );
+}
+
 export default function OrderManagementView() {
   const [items, setItems] = useState<OrderItemWithContext[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -40,24 +74,34 @@ export default function OrderManagementView() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // collectionGroup('items') will get all items from all orders and requests
-    // But we probably only want items from 'orders'
-    // Actually requests items also have statuses, but user said "order management where there will be positions of all orders"
     const q = query(collectionGroup(db, 'items'), orderBy('productName', 'asc'));
     
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       const itemsData: OrderItemWithContext[] = [];
       
+      const parentOrderCache: Record<string, { customerName: string; createdAt: any }> = {};
+
       for (const itemDoc of snapshot.docs) {
-        // Only include items from 'orders' collection
         if (itemDoc.ref.parent.parent?.parent?.path === 'orders' || itemDoc.ref.parent.parent?.path === 'orders') {
            const data = itemDoc.data() as OrderItem;
            const parentOrderId = itemDoc.ref.parent.parent?.id || '';
            
+           if (!parentOrderCache[parentOrderId]) {
+             const parentDoc = await getDoc(doc(db, 'orders', parentOrderId));
+             if (parentDoc.exists()) {
+               parentOrderCache[parentOrderId] = {
+                 customerName: parentDoc.data().customerName,
+                 createdAt: parentDoc.data().createdAt
+               };
+             }
+           }
+
            itemsData.push({
              ...data,
              id: itemDoc.id,
-             parentOrderId
+             parentOrderId,
+             customerName: parentOrderCache[parentOrderId]?.customerName,
+             orderDate: parentOrderCache[parentOrderId]?.createdAt
            });
         }
       }
@@ -65,22 +109,25 @@ export default function OrderManagementView() {
       setItems(itemsData);
       setIsLoading(false);
     }, (error) => {
-      console.error(error);
+      handleFirestoreError(error, OperationType.LIST, 'items-group');
       setIsLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
 
-  const updateItemStatus = async (item: OrderItemWithContext, newStatus: ItemStatus) => {
+  const updateItemField = async (item: OrderItemWithContext, field: string, value: any) => {
+    const val = field.includes('Price') || field === 'quantity' 
+      ? (value === '' ? 0 : Number(String(value).replace(',', '.'))) 
+      : value;
+
     try {
       const itemRef = doc(db, `orders/${item.parentOrderId}/items/${item.id}`);
       await updateDoc(itemRef, { 
-        status: newStatus,
+        [field]: val,
         updatedAt: serverTimestamp()
       });
       
-      // Also update parent order updatedAt
       await updateDoc(doc(db, 'orders', item.parentOrderId), {
         updatedAt: serverTimestamp()
       });
@@ -89,10 +136,19 @@ export default function OrderManagementView() {
     }
   };
 
+  const updateItemStatus = async (item: OrderItemWithContext, newStatus: ItemStatus) => {
+    await updateItemField(item, 'status', newStatus);
+  };
+
   const filteredItems = items.filter(i => {
-    const matchesSearch = i.productName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                         i.partNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         i.brand?.toLowerCase().includes(searchTerm.toLowerCase());
+    const productName = (i.productName || '').toLowerCase();
+    const partNumber = (i.partNumber || '').toLowerCase();
+    const brand = (i.brand || '').toLowerCase();
+    const searchTermLower = searchTerm.toLowerCase();
+
+    const matchesSearch = productName.includes(searchTermLower) || 
+                         partNumber.includes(searchTermLower) ||
+                         brand.includes(searchTermLower);
     const matchesFilter = filterStatus === 'All' || i.status === filterStatus;
     return matchesSearch && matchesFilter;
   });
@@ -110,8 +166,37 @@ export default function OrderManagementView() {
     }
   };
 
+  const stats = {
+    pending: items.filter(i => i.status === 'Pending').length,
+    ordered: items.filter(i => i.status === 'Ordered').length,
+    available: items.filter(i => i.status === 'Available').length
+  };
+
   return (
     <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Управління позиціями</h1>
+          <p className="text-slate-500 text-sm font-medium">Контроль статусу кожної деталі в замовленнях</p>
+        </div>
+
+        <div className="flex gap-2">
+          {[
+            { label: 'Очікує', count: stats.pending, color: 'bg-amber-500', bg: 'bg-amber-50' },
+            { label: 'Замовлено', count: stats.ordered, color: 'bg-purple-500', bg: 'bg-purple-50' },
+            { label: 'На складі', count: stats.available, color: 'bg-blue-500', bg: 'bg-blue-50' },
+          ].map((stat, idx) => (
+            <div key={idx} className={cn("px-4 py-2 rounded-xl border border-slate-100 shadow-sm flex items-center gap-3", stat.bg)}>
+              <div className={cn("w-2 h-2 rounded-full", stat.color)} />
+              <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">{stat.label}</p>
+                <p className="text-sm font-black text-slate-700 leading-none">{stat.count}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="flex flex-col lg:flex-row gap-4 justify-between items-start lg:items-center">
         <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
           <div className="relative flex-1 sm:w-64 min-w-[200px]">
@@ -146,64 +231,135 @@ export default function OrderManagementView() {
 
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="w-full text-left border-collapse min-w-[1000px]">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-24">Дата</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Артикул / Бренд</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Назва</th>
-                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">К-ть</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-20 text-center">К-ть</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-24">Вхід (₴)</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-24">Продаж (₴)</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest w-24">Прибуток / ROI</th>
+                <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Срок</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Постачальник</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Статус</th>
                 <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Замовлення</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredItems.map(item => (
-                <tr key={item.id} className="hover:bg-slate-50/50 transition-colors group">
-                  <td className="px-6 py-4">
-                    <p className="text-sm font-mono font-bold text-slate-700 uppercase tracking-wider">{item.partNumber}</p>
-                    <p className="text-[10px] font-black text-blue-500 uppercase mt-0.5">{item.brand || 'No Brand'}</p>
-                  </td>
-                  <td className="px-6 py-4">
-                    <p className="text-sm font-medium text-slate-900 line-clamp-1">{item.productName}</p>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="text-sm font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded w-8 inline-block text-center">
-                      {item.quantity}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2 text-xs font-bold text-slate-600 italic">
-                      <Building2 className="w-3 h-3 text-slate-300" />
-                      {item.supplier || '-'}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <select
-                      value={item.status}
-                      onChange={(e) => updateItemStatus(item, e.target.value as ItemStatus)}
-                      className={cn(
-                        "text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg border outline-none transition-all cursor-pointer",
-                        getStatusClass(item.status)
-                      )}
-                    >
-                      <option value="Pending">Очікує</option>
-                      <option value="Ordered">Замовлено</option>
-                      <option value="Available">В наявності</option>
-                      <option value="Picked">Зібрано</option>
-                      <option value="Packed">Запаковано</option>
-                      <option value="Issued">Видано</option>
-                      <option value="Out of Stock">Немає</option>
-                    </select>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <div className="flex flex-col items-end">
-                      <span className="text-[10px] font-mono text-slate-400">ID: {item.parentOrderId.slice(0, 8)}</span>
-                      <a href={`#orders`} className="text-[10px] font-bold text-blue-500 hover:underline">Перейти</a>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {filteredItems.map(item => {
+                const roi = item.costPrice > 0 ? ((item.sellingPrice - item.costPrice) / item.costPrice * 100).toFixed(0) : '0';
+                return (
+                  <tr key={item.id} className="hover:bg-slate-50/50 transition-colors group">
+                    <td className="px-6 py-4">
+                      <div className="text-[10px] font-bold text-slate-400 leading-none">
+                        {item.orderDate?.toDate ? item.orderDate.toDate().toLocaleDateString('uk-UA') : '-'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <EditableInput 
+                        value={item.partNumber} 
+                        onSave={(val) => updateItemField(item, 'partNumber', val)}
+                        className="text-sm font-mono font-bold text-slate-700 uppercase tracking-wider"
+                      />
+                      <EditableInput 
+                        value={item.brand || ''} 
+                        onSave={(val) => updateItemField(item, 'brand', val)}
+                        className="text-[10px] font-black text-blue-500 uppercase mt-0.5"
+                        placeholder="Бренд"
+                      />
+                    </td>
+                    <td className="px-6 py-4">
+                      <EditableInput 
+                        value={item.productName} 
+                        onSave={(val) => updateItemField(item, 'productName', val)}
+                        className="text-sm font-medium text-slate-900"
+                      />
+                    </td>
+                    <td className="px-6 py-4 text-center">
+                      <EditableInput 
+                        type="number"
+                        value={item.quantity} 
+                        onSave={(val) => updateItemField(item, 'quantity', val)}
+                        className="w-12 bg-slate-100 text-sm font-bold text-slate-600 px-2 py-1 rounded text-center"
+                      />
+                    </td>
+                    <td className="px-6 py-4">
+                      <EditableInput 
+                        type="number"
+                        value={item.costPrice} 
+                        onSave={(val) => updateItemField(item, 'costPrice', val)}
+                        className="w-20 bg-slate-50 border border-transparent rounded-lg px-2 py-1 text-xs"
+                        placeholder="0"
+                      />
+                    </td>
+                    <td className="px-6 py-4">
+                      <EditableInput 
+                        type="number"
+                        value={item.sellingPrice} 
+                        onSave={(val) => updateItemField(item, 'sellingPrice', val)}
+                        className="w-20 bg-slate-50 border border-transparent rounded-lg px-2 py-1 text-sm font-black text-slate-900"
+                        placeholder="0"
+                      />
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <span className={cn(
+                          "px-1.5 py-0.5 rounded text-[9px] font-black",
+                          Number(roi) > 30 ? "bg-emerald-100 text-emerald-600" : 
+                          Number(roi) > 15 ? "bg-blue-100 text-blue-600" : "bg-slate-100 text-slate-50"
+                        )}>
+                          {roi}%
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-400">
+                          {formatCurrency(item.sellingPrice - item.costPrice)}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <EditableInput 
+                        value={item.deliveryTime || ''} 
+                        onSave={(val) => updateItemField(item, 'deliveryTime', val)}
+                        className="text-xs font-bold text-blue-600"
+                        placeholder="н/д"
+                      />
+                    </td>
+                    <td className="px-6 py-4">
+                      <EditableInput 
+                        value={item.supplier || ''} 
+                        onSave={(val) => updateItemField(item, 'supplier', val)}
+                        className="text-xs font-bold text-slate-600 italic focus:text-blue-600"
+                        placeholder="н/д"
+                      />
+                    </td>
+                    <td className="px-6 py-4">
+                      <select
+                        value={item.status}
+                        onChange={(e) => updateItemStatus(item, e.target.value as ItemStatus)}
+                        className={cn(
+                          "text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg border outline-none transition-all cursor-pointer",
+                          getStatusClass(item.status)
+                        )}
+                      >
+                        <option value="Pending">Очікує</option>
+                        <option value="Ordered">Замовлено</option>
+                        <option value="Available">В наявності</option>
+                        <option value="Picked">Зібрано</option>
+                        <option value="Packed">Запаковано</option>
+                        <option value="Issued">Видано</option>
+                        <option value="Out of Stock">Немає</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex flex-col items-end">
+                        <span className="text-[10px] font-black text-slate-900 line-clamp-1">{item.customerName || 'Клієнт'}</span>
+                        <span className="text-[9px] font-mono text-slate-400">ID: {item.parentOrderId.slice(0, 8)}</span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           

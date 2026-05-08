@@ -1,11 +1,16 @@
-import { useEffect, useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent, useRef } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { 
   collection, 
   onSnapshot, 
   serverTimestamp, 
   runTransaction,
-  doc
+  doc,
+  getDocs,
+  query,
+  where,
+  setDoc,
+  addDoc
 } from 'firebase/firestore';
 import { 
   X, 
@@ -15,16 +20,17 @@ import {
   Package,
   User,
   Phone,
-  Car,
+  Car as CarIcon,
   Fingerprint,
   Calendar,
   Zap,
   Tag,
   Building2,
-  FileText
+  FileText,
+  ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Product, ItemStatus } from '../types';
+import { Product, ItemStatus, Client, Car } from '../types';
 import { cn, formatCurrency } from '../lib/utils';
 
 interface CreateRequestModalProps {
@@ -39,16 +45,22 @@ interface NewRequestItem {
   brand: string;
   productName: string;
   quantity: number;
-  costPrice: number;
-  sellingPrice: number;
+  costPrice: string | number;
+  sellingPrice: string | number;
   supplier: string;
+  deliveryTime?: string;
   status: ItemStatus;
 }
 
 export default function CreateRequestModal({ isOpen, onClose }: CreateRequestModalProps) {
   const [products, setProducts] = useState<Product[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
+  const [clientSearchTerm, setClientSearchTerm] = useState('');
+  const [showClientSuggestions, setShowClientSuggestions] = useState(false);
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [clientCars, setClientCars] = useState<Car[]>([]);
+  const [showCarSelector, setShowCarSelector] = useState(false);
   
   // Request Header Data
   const [customerName, setCustomerName] = useState('');
@@ -60,17 +72,67 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
 
   // Request Items Table
   const [items, setItems] = useState<NewRequestItem[]>([]);
-  
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'products'), (snapshot) => {
+    const unsubscribeProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
       setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
     });
-    return () => unsubscribe();
+
+    const unsubscribeClients = onSnapshot(collection(db, 'clients'), (snapshot) => {
+      setClients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client)));
+    });
+
+    return () => {
+      unsubscribeProducts();
+      unsubscribeClients();
+    };
   }, []);
 
-  const totalAmount = items.reduce((acc, item) => acc + (item.sellingPrice * item.quantity), 0);
+  useEffect(() => {
+    if (selectedClient) {
+      const q = collection(db, `clients/${selectedClient.id}/cars`);
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        setClientCars(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Car)));
+      });
+      return () => unsubscribe();
+    } else {
+      setClientCars([]);
+    }
+  }, [selectedClient]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowClientSuggestions(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSelectClient = (client: Client) => {
+    setSelectedClient(client);
+    setCustomerName(client.name);
+    setCustomerPhone(client.phone || '');
+    setClientSearchTerm(client.name);
+    setShowClientSuggestions(false);
+  };
+
+  const handleSelectCar = (car: Car) => {
+    setCarModel(car.model);
+    setVin(car.vin || '');
+    setCarYear(car.year || '');
+    setEngineVolume(car.engineVolume || '');
+    setShowCarSelector(false);
+  };
+
+  const totalAmount = items.reduce((acc, item) => {
+    const price = item.sellingPrice === '' ? 0 : Number(item.sellingPrice);
+    return acc + (price * item.quantity);
+  }, 0);
 
   const addNewRow = () => {
     setItems(prev => [...prev, {
@@ -79,8 +141,8 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
       brand: '',
       productName: '',
       quantity: 1,
-      costPrice: 0,
-      sellingPrice: 0,
+      costPrice: '',
+      sellingPrice: '',
       supplier: '',
       status: 'Pending'
     }]);
@@ -121,13 +183,52 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
     if (items.length === 0 || !customerName || !auth.currentUser) return;
     setIsSubmitting(true);
 
-    const totalProfit = items.reduce((acc, i) => acc + (i.sellingPrice - i.costPrice) * i.quantity, 0);
-
-    const path = 'requests';
     try {
+      let clientId = selectedClient?.id;
+
+      // 1. Handle Client Creation
+      if (!clientId) {
+        // Search if client already exists by name
+        const existingClient = clients.find(c => c.name.toLowerCase() === customerName.toLowerCase());
+        if (existingClient) {
+          clientId = existingClient.id;
+        } else {
+          const clientRef = doc(collection(db, 'clients'));
+          await setDoc(clientRef, {
+            name: customerName,
+            phone: customerPhone,
+            balance: 0,
+            totalTurnover: 0,
+            createdAt: serverTimestamp()
+          });
+          clientId = clientRef.id;
+        }
+      }
+
+      // 2. Handle Car Creation/Update
+      if (clientId && carModel) {
+        const existingCar = clientCars.find(c => c.vin === vin && vin !== '');
+        if (!existingCar) {
+          await addDoc(collection(db, `clients/${clientId}/cars`), {
+            model: carModel,
+            vin,
+            year: carYear,
+            engineVolume,
+            updatedAt: serverTimestamp()
+          });
+        }
+      }
+
+      const totalProfit = items.reduce((acc, i) => {
+        const sp = i.sellingPrice === '' ? 0 : Number(i.sellingPrice);
+        const cp = i.costPrice === '' ? 0 : Number(i.costPrice);
+        return acc + (sp - cp) * i.quantity;
+      }, 0);
+
       await runTransaction(db, async (transaction) => {
-        const requestRef = doc(collection(db, path));
+        const requestRef = doc(collection(db, 'requests'));
         transaction.set(requestRef, {
+          clientId: clientId || null,
           customerName,
           customerPhone,
           carModel,
@@ -152,7 +253,8 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
             quantity: item.quantity,
             costPrice: Number(item.costPrice),
             sellingPrice: Number(item.sellingPrice),
-            supplier: item.supplier,
+            supplier: item.supplier || '',
+            deliveryTime: item.deliveryTime || '',
             status: item.status
           });
         }
@@ -233,13 +335,62 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
                     Дані клієнта
                   </h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div className="space-y-2">
+                    <div className="space-y-2 relative" ref={dropdownRef}>
                       <label className="text-xs font-bold text-slate-500 uppercase ml-1">Клієнт *</label>
                       <div className="relative">
                         <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                        <input required value={customerName} onChange={e => setCustomerName(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 text-sm" placeholder="ПІБ клієнта" />
+                        <input 
+                          required 
+                          value={customerName} 
+                          onChange={e => {
+                            setCustomerName(e.target.value);
+                            setShowClientSuggestions(true);
+                            if (selectedClient && e.target.value !== selectedClient.name) {
+                              setSelectedClient(null);
+                            }
+                          }} 
+                          onFocus={() => setShowClientSuggestions(true)}
+                          className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 text-sm" 
+                          placeholder="ПІБ клієнта" 
+                        />
                       </div>
+                      
+                      <AnimatePresence>
+                        {showClientSuggestions && customerName.length > 0 && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 10 }}
+                            className="absolute z-50 left-0 right-0 top-full mt-2 bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden max-h-64 overflow-y-auto"
+                          >
+                            {clients
+                              .filter(c => 
+                                c.name.toLowerCase().includes(customerName.toLowerCase()) ||
+                                (c.phone && c.phone.toLowerCase().includes(customerName.toLowerCase()))
+                              )
+                              .map(client => (
+                                <button
+                                  key={client.id}
+                                  type="button"
+                                  onClick={() => handleSelectClient(client)}
+                                  className="w-full px-4 py-3 text-left hover:bg-slate-50 flex items-center justify-between group transition-colors"
+                                >
+                                  <div>
+                                    <p className="text-sm font-bold text-slate-800">{client.name}</p>
+                                    <p className="text-[10px] text-slate-400 font-bold uppercase">{client.phone || 'Немає телефону'}</p>
+                                  </div>
+                                  <User className="w-4 h-4 text-slate-300 group-hover:text-emerald-500" />
+                                </button>
+                              ))
+                            }
+                            {clients.filter(c => c.name.toLowerCase().includes(customerName.toLowerCase())).length === 0 && (
+                              <div className="px-4 py-3 text-sm text-slate-400 text-center italic">Новий клієнт</div>
+                            )}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
+
                     <div className="space-y-2">
                       <label className="text-xs font-bold text-slate-500 uppercase ml-1">Телефон</label>
                       <div className="relative">
@@ -247,12 +398,53 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
                         <input value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 text-sm" placeholder="+380..." />
                       </div>
                     </div>
-                    <div className="space-y-2">
+
+                    <div className="space-y-2 relative">
                       <label className="text-xs font-bold text-slate-500 uppercase ml-1">Автомобіль</label>
                       <div className="relative">
-                        <Car className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                        <input value={carModel} onChange={e => setCarModel(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 text-sm" placeholder="Марка, модель" />
+                        <CarIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input 
+                          value={carModel} 
+                          onChange={e => setCarModel(e.target.value)} 
+                          className="w-full pl-10 pr-10 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 text-sm" 
+                          placeholder="Марка, модель" 
+                        />
+                        {clientCars.length > 0 && (
+                          <button 
+                            type="button"
+                            onClick={() => setShowCarSelector(!showCarSelector)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-slate-200 rounded transition-colors"
+                          >
+                            <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform", showCarSelector && "rotate-180")} />
+                          </button>
+                        )}
                       </div>
+
+                      <AnimatePresence>
+                        {showCarSelector && clientCars.length > 0 && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 10 }}
+                            className="absolute z-50 left-0 right-0 top-full mt-2 bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden"
+                          >
+                            {clientCars.map(car => (
+                              <button
+                                key={car.id}
+                                type="button"
+                                onClick={() => handleSelectCar(car)}
+                                className="w-full px-4 py-3 text-left hover:bg-slate-50 flex items-center justify-between group transition-colors"
+                              >
+                                <div>
+                                  <p className="text-sm font-bold text-slate-800">{car.model}</p>
+                                  <p className="text-[10px] text-slate-400 font-mono uppercase">{car.vin || 'VIN не вказано'}</p>
+                                </div>
+                                <CarIcon className="w-4 h-4 text-slate-300 group-hover:text-emerald-500" />
+                              </button>
+                            ))}
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
                     </div>
                   </div>
                 </div>
@@ -280,6 +472,9 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
                           <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">К-ть</th>
                           <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Вхід (₴)</th>
                           <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Продаж (₴)</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Срок</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Постачальник</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Статус</th>
                           <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter"></th>
                         </tr>
                       </thead>
@@ -299,10 +494,41 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
                               <input type="number" value={item.quantity} onChange={e => updateItem(item.id, 'quantity', parseInt(e.target.value) || 1)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs text-center" />
                             </td>
                             <td className="px-3 py-2 w-24">
-                              <input type="number" value={item.costPrice} onChange={e => updateItem(item.id, 'costPrice', parseFloat(e.target.value) || 0)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs" />
+                              <input type="number" value={item.costPrice === 0 ? '' : item.costPrice} onChange={e => updateItem(item.id, 'costPrice', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs" />
                             </td>
                             <td className="px-3 py-2 w-24">
-                              <input type="number" value={item.sellingPrice} onChange={e => updateItem(item.id, 'sellingPrice', parseFloat(e.target.value) || 0)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs font-bold text-slate-900" />
+                              <input type="number" value={item.sellingPrice === 0 ? '' : item.sellingPrice} onChange={e => updateItem(item.id, 'sellingPrice', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs font-bold text-slate-900" />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input value={item.deliveryTime || ''} onChange={e => updateItem(item.id, 'deliveryTime', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs font-bold text-blue-600 uppercase" placeholder="Срок" />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input value={item.supplier} onChange={e => updateItem(item.id, 'supplier', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs" placeholder="Постачальник" />
+                            </td>
+                            <td className="px-3 py-2">
+                              <select 
+                                value={item.status} 
+                                onChange={e => updateItem(item.id, 'status', e.target.value as ItemStatus)} 
+                                className={cn(
+                                  "w-full px-2 py-1.5 rounded-lg outline-none border text-[10px] font-black uppercase tracking-tighter transition-all cursor-pointer",
+                                  item.status === 'Pending' ? "bg-amber-50 text-amber-600 border-amber-100" :
+                                  item.status === 'Ordered' ? "bg-purple-50 text-purple-600 border-purple-100" :
+                                  item.status === 'Available' ? "bg-blue-50 text-blue-600 border-blue-100" :
+                                  item.status === 'Out of Stock' ? "bg-rose-50 text-rose-600 border-rose-100" :
+                                  item.status === 'Picked' ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
+                                  item.status === 'Packed' ? "bg-indigo-50 text-indigo-600 border-indigo-100" :
+                                  item.status === 'Issued' ? "bg-slate-900 text-white border-slate-900" :
+                                  "bg-slate-50 text-slate-500 border-slate-200"
+                                )}
+                              >
+                                <option value="Pending">Очікує</option>
+                                <option value="Ordered">Замовлено</option>
+                                <option value="Available">В наявності</option>
+                                <option value="Out of Stock">Немає</option>
+                                <option value="Picked">Зібрано</option>
+                                <option value="Packed">Запаковано</option>
+                                <option value="Issued">Видано</option>
+                              </select>
                             </td>
                             <td className="px-3 py-2 text-center">
                               <button type="button" onClick={() => removeItem(item.id)} className="p-1.5 text-slate-300 hover:text-red-500 transition-colors">
