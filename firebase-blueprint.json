@@ -1,0 +1,136 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Stock item in the warehouse",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "sku": { "type": "string" },
+        "stock": { "type": "integer" },
+        "price": { "type": "number" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "imageUrl": { "type": "string" }
+      },
+      "required": ["name", "sku", "stock", "price"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer order containing items and vehicle data",
+      "type": "object",
+      "properties": {
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "carModel": { "type": "string" },
+        "vin": { "type": "string" },
+        "carYear": { "type": "string" },
+        "engineVolume": { "type": "string" },
+        "status": { 
+          "type": "string",
+          "enum": ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"]
+        },
+        "totalAmount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "creatorId": { "type": "string" }
+      },
+      "required": ["customerName", "status", "totalAmount", "createdAt", "creatorId"]
+    },
+    "OrderItem": {
+      "title": "OrderItem",
+      "description": "A single part line item within a car order",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string" },
+        "partNumber": { "type": "string" },
+        "brand": { "type": "string" },
+        "productName": { "type": "string" },
+        "quantity": { "type": "integer" },
+        "costPrice": { "type": "number" },
+        "sellingPrice": { "type": "number" },
+        "supplier": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["Pending", "Ordered", "Available", "Out of Stock", "Picked", "Packed", "Issued"]
+        }
+      },
+      "required": ["partNumber", "productName", "quantity", "costPrice", "sellingPrice", "status"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Customer financial records and account details",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "balance": { "type": "number" },
+        "totalTurnover": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "balance", "totalTurnover", "createdAt"]
+    },
+    "FinancialTransaction": {
+      "title": "FinancialTransaction",
+      "description": "A single financial movement (payment, order charge, or refund)",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["Payment", "Refund", "Order", "Adjustment"] },
+        "description": { "type": "string" },
+        "orderId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["clientId", "amount", "type", "description", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "System notification for users",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "message", "read", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Inventory products"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Customer orders"
+    },
+    "/orders/{orderId}/items/{itemId}": {
+      "schema": "OrderItem",
+      "description": "Items within an order"
+    },
+    "/requests/{requestId}": {
+      "schema": "Order",
+      "description": "Customer requests before being finalized to orders"
+    },
+    "/requests/{requestId}/items/{itemId}": {
+      "schema": "OrderItem",
+      "description": "Items within a request"
+    },
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "Customer financial records"
+    },
+    "/clients/{clientId}/transactions/{txId}": {
+      "schema": "FinancialTransaction",
+      "description": "Financial history for a client"
+    },
+    "/notifications/{notifId}": {
+      "schema": "Notification",
+      "description": "User notifications"
+    }
+  }
+}

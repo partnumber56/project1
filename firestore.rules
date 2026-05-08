@@ -1,0 +1,157 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'partnumber56@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Helpers ---
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['name', 'sku', 'stock', 'price']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.sku is string && data.sku.size() > 0 && data.sku.size() <= 50 &&
+             data.stock is int && data.stock >= 0 &&
+             data.price is number && data.price >= 0;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['customerName', 'status', 'totalAmount', 'createdAt', 'creatorId']) &&
+             data.customerName is string && data.customerName.size() > 0 &&
+             data.status in ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled', 'Request'] &&
+             data.totalAmount is number && data.totalAmount >= 0 &&
+             data.creatorId == request.auth.uid &&
+             data.createdAt == request.time;
+      // Optional car fields are implicitly allowed unless we add strict schema check here
+    }
+
+    function isValidOrderItem(data) {
+      return data.keys().hasAll(['partNumber', 'productName', 'quantity', 'costPrice', 'sellingPrice', 'status']) &&
+             data.partNumber is string &&
+             data.productName is string &&
+             (data.get('brand', '') is string) &&
+             data.quantity is int && data.quantity > 0 &&
+             data.costPrice is number &&
+             data.sellingPrice is number &&
+             data.status in ['Pending', 'Ordered', 'Available', 'Out of Stock', 'Picked', 'Packed', 'Issued'];
+    }
+
+    function isValidClient(data) {
+      return data.keys().hasAll(['name', 'balance', 'totalTurnover', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.balance is number &&
+             data.totalTurnover is number &&
+             data.createdAt == request.time;
+    }
+
+    function isValidFinancialTransaction(data) {
+      return data.keys().hasAll(['clientId', 'amount', 'type', 'description', 'createdAt']) &&
+             data.clientId is string &&
+             data.amount is number &&
+             data.type in ['Payment', 'Refund', 'Order', 'Adjustment'] &&
+             data.description is string &&
+             data.createdAt == request.time;
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['userId', 'message', 'type', 'read', 'createdAt']) &&
+             data.userId is string &&
+             data.message is string &&
+             data.read is bool &&
+             data.createdAt == request.time;
+    }
+
+    // --- Collection Routes ---
+
+    match /products/{productId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidProduct(incoming());
+      allow delete: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidOrder(incoming());
+      allow update: if isSignedIn() && (
+        (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'customerName', 'customerEmail', 'totalAmount']) && 
+         incoming().updatedAt == request.time) ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+
+      match /items/{itemId} {
+        allow read: if isSignedIn();
+        allow create, update: if isSignedIn() && isValidOrderItem(incoming());
+        allow delete: if isSignedIn();
+      }
+    }
+
+    match /requests/{requestId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidOrder(incoming());
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn();
+
+      match /items/{itemId} {
+        allow read: if isSignedIn();
+        allow create, update: if isSignedIn() && isValidOrderItem(incoming());
+        allow delete: if isSignedIn();
+      }
+    }
+
+    match /clients/{clientId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidClient(incoming());
+      allow delete: if isAdmin();
+
+      match /transactions/{txId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && isValidFinancialTransaction(incoming());
+        allow write: if false;
+      }
+    }
+
+    match /notifications/{notifId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn(); // System/users can create notifications
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && 
+                    incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if false; // Managed via console
+    }
+  }
+}
