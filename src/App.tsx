@@ -15,7 +15,10 @@ import {
   limit,
   Timestamp,
   addDoc,
-  serverTimestamp 
+  serverTimestamp,
+  doc,
+  getDoc,
+  setDoc
 } from 'firebase/firestore';
 import { 
   LayoutDashboard, 
@@ -35,11 +38,13 @@ import {
   ChevronRight,
   TrendingDown,
   Wallet,
-  FileText
+  FileText,
+  Users,
+  ShieldAlert
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from './lib/utils';
-import { Order, Product, Notification, OrderStatus } from './types';
+import { Order, Product, Notification, OrderStatus, Role } from './types';
 import DashboardView from './components/DashboardView';
 import InventoryView from './components/InventoryView';
 import OrdersView from './components/OrdersView';
@@ -47,11 +52,14 @@ import ReportsView from './components/ReportsView';
 import RequestsView from './components/RequestsView';
 import OrderManagementView from './components/OrderManagementView';
 import FinanceView from './components/FinanceView';
+import UserManagementView from './components/UserManagementView';
 
-type View = 'dashboard' | 'inventory' | 'orders' | 'reports' | 'requests' | 'items' | 'finance';
+type View = 'dashboard' | 'inventory' | 'orders' | 'reports' | 'requests' | 'items' | 'finance' | 'users';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
+  const [userRole, setUserRole] = useState<Role | null>(null);
+  const [checkingRole, setCheckingRole] = useState(true);
   const [loading, setLoading] = useState(true);
   const [activeView, setActiveView] = useState<View>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -59,9 +67,55 @@ export default function App() {
   const [showNotifications, setShowNotifications] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
-      setLoading(false);
+      if (u) {
+        setCheckingRole(true);
+        const lowercaseEmail = (u.email || '').toLowerCase();
+        
+        // 1. Check if primary admin
+        if (lowercaseEmail === 'partnumber56@gmail.com') {
+          setUserRole('admin');
+          setCheckingRole(false);
+          setLoading(false);
+          try {
+            const userRef = doc(db, 'users', lowercaseEmail);
+            const docSnap = await getDoc(userRef);
+            if (!docSnap.exists()) {
+              await setDoc(userRef, {
+                name: u.displayName || 'Primary Admin',
+                email: lowercaseEmail,
+                role: 'admin',
+                createdAt: serverTimestamp()
+              });
+            }
+          } catch (e) {
+            console.error('Failed to create admin doc:', e);
+          }
+        } else {
+          // 2. Check users collection
+          try {
+            const userRef = doc(db, 'users', lowercaseEmail);
+            const docSnap = await getDoc(userRef);
+            if (docSnap.exists()) {
+              const data = docSnap.data();
+              setUserRole(data.role as Role);
+            } else {
+              setUserRole(null); // No access
+            }
+          } catch (e) {
+            console.error('Error fetching user role:', e);
+            setUserRole(null);
+          } finally {
+            setCheckingRole(false);
+            setLoading(false);
+          }
+        }
+      } else {
+        setUserRole(null);
+        setCheckingRole(false);
+        setLoading(false);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -75,12 +129,18 @@ export default function App() {
       limit(5)
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setNotifications(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Notification)));
+      setNotifications(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Notification)));
     });
     return () => unsubscribe();
   }, [user]);
 
-  if (loading) {
+  useEffect(() => {
+    if (userRole === 'manager' && (activeView === 'finance' || activeView === 'reports' || activeView === 'users')) {
+      setActiveView('dashboard');
+    }
+  }, [userRole, activeView]);
+
+  if (loading || (user && checkingRole)) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-50">
         <motion.div 
@@ -88,6 +148,37 @@ export default function App() {
           transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
           className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full"
         />
+      </div>
+    );
+  }
+
+  if (user && !userRole) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 p-4">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-white p-8 rounded-2xl shadow-2xl max-w-md w-full text-center border border-slate-100"
+        >
+          <div className="bg-rose-100 p-4 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-6 text-rose-600">
+            <ShieldAlert className="w-10 h-10" />
+          </div>
+          <h1 className="text-2xl font-black text-slate-900 mb-2 font-sans">Доступ обмежено</h1>
+          <p className="text-slate-600 text-sm mb-6 font-medium">
+            Ваша електронна пошта <span className="font-bold text-slate-900">{user.email}</span> не має доступу до цієї системи.
+          </p>
+          <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 mb-8 text-left text-xs text-slate-500 font-medium">
+            Зверніться до адміністратора для реєстрації вашого акаунту та надання ролі (Адміністратор чи Менеджер).
+          </div>
+          
+          <button
+            onClick={logout}
+            className="w-full flex items-center justify-center gap-3 bg-slate-950 hover:bg-slate-900 active:scale-95 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-lg text-sm uppercase tracking-wider"
+          >
+            <LogOut className="w-5 h-5" />
+            Вийти з акаунту
+          </button>
+        </motion.div>
       </div>
     );
   }
@@ -166,13 +257,15 @@ export default function App() {
             expanded={isSidebarOpen} 
             onClick={() => setActiveView('items')} 
           />
-          <NavItem 
-            icon={<Wallet />} // replaced TrendingDown for consistency or add it
-            label="Фінанси" 
-            isActive={activeView === 'finance'} 
-            expanded={isSidebarOpen} 
-            onClick={() => setActiveView('finance')} 
-          />
+          {userRole === 'admin' && (
+            <NavItem 
+              icon={<Wallet />} // replaced TrendingDown for consistency or add it
+              label="Фінанси" 
+              isActive={activeView === 'finance'} 
+              expanded={isSidebarOpen} 
+              onClick={() => setActiveView('finance')} 
+            />
+          )}
           <NavItem 
             icon={<Package />} 
             label="Склад" 
@@ -180,13 +273,24 @@ export default function App() {
             expanded={isSidebarOpen} 
             onClick={() => setActiveView('inventory')} 
           />
-          <NavItem 
-            icon={<TrendingDown />} 
-            label="Звіти" 
-            isActive={activeView === 'reports'} 
-            expanded={isSidebarOpen} 
-            onClick={() => setActiveView('reports')} 
-          />
+          {userRole === 'admin' && (
+            <NavItem 
+              icon={<TrendingDown />} 
+              label="Звіти" 
+              isActive={activeView === 'reports'} 
+              expanded={isSidebarOpen} 
+              onClick={() => setActiveView('reports')} 
+            />
+          )}
+          {userRole === 'admin' && (
+            <NavItem 
+              icon={<Users />} 
+              label="Користувачі" 
+              isActive={activeView === 'users'} 
+              expanded={isSidebarOpen} 
+              onClick={() => setActiveView('users')} 
+            />
+          )}
         </nav>
 
         <div className="p-4 border-t border-slate-800">
@@ -213,7 +317,8 @@ export default function App() {
                activeView === 'orders' ? 'Управління замовленнями' : 
                activeView === 'items' ? 'Всі позиції замовлень' :
                activeView === 'finance' ? 'Фінансово-клієнтський облік' :
-               activeView === 'inventory' ? 'Товарні запаси' : 'Звітність'}
+               activeView === 'inventory' ? 'Товарні запаси' : 
+               activeView === 'users' ? 'Керування доступом' : 'Звітність'}
             </h2>
           </div>
 
@@ -260,7 +365,9 @@ export default function App() {
             <div className="flex items-center gap-3">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-semibold text-slate-800 mb-0">{user.displayName || 'Користувач'}</p>
-                <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Адмін-панель</p>
+                <p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">
+                  {userRole === 'admin' ? 'Адмін-панель' : 'Панель менеджера'}
+                </p>
               </div>
               {user.photoURL ? (
                 <img src={user.photoURL} alt="Avatar" className="w-10 h-10 rounded-full border-2 border-blue-500/20" />
@@ -295,8 +402,9 @@ export default function App() {
               {activeView === 'inventory' && <InventoryView />}
               {activeView === 'orders' && <OrdersView />}
               {activeView === 'items' && <OrderManagementView />}
-              {activeView === 'finance' && <FinanceView />}
-              {activeView === 'reports' && <ReportsView />}
+              {activeView === 'finance' && userRole === 'admin' && <FinanceView />}
+              {activeView === 'reports' && userRole === 'admin' && <ReportsView />}
+              {activeView === 'users' && userRole === 'admin' && <UserManagementView currentUserEmail={user.email || ''} />}
             </motion.div>
           </AnimatePresence>
         </div>

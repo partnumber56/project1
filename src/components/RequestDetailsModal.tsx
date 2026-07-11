@@ -26,7 +26,9 @@ import {
   CheckCircle2,
   FileText,
   Save,
-  Plus
+  Plus,
+  Copy,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Order, OrderItem, Client } from '../types';
@@ -76,11 +78,44 @@ export default function RequestDetailsModal({ request, onClose }: RequestDetails
   const [isProcessing, setIsProcessing] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [showClientSuggestions, setShowClientSuggestions] = useState(false);
+  const [copied, setCopied] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const handleCopyToGemini = () => {
+    if (!request) return;
+    const itemsText = items.map((item, index) => {
+      return `${index + 1}. ${item.productName}
+   Артикул: ${item.partNumber || 'н/д'}
+   Бренд: ${item.brand || 'н/д'}
+   Кількість: ${item.quantity} шт.
+   Закупівля: ${formatCurrency(item.costPrice)} | Продаж: ${formatCurrency(item.sellingPrice)}
+   Постачальник: ${item.supplier || 'н/д'} | Доставка: ${item.deliveryTime || 'н/д'}`;
+    }).join('\n\n');
+
+    const textToCopy = `Запит #${request.id}
+Статус: ${request.status}
+Клієнт: ${request.customerName}
+Телефон: ${request.customerPhone || 'н/д'}
+Автомобіль: ${request.carModel || 'н/д'} ${request.carYear ? `(${request.carYear})` : ''}
+VIN: ${request.vin || 'н/д'}
+Двигун: ${request.engineVolume || 'н/д'}
+
+Запитувані позиції:
+${itemsText}
+
+Загальна сума: ${formatCurrency(request.totalAmount)}`;
+
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(err => {
+      console.error('Could not copy text: ', err);
+    });
+  };
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'clients'), (snapshot) => {
-      setClients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client)));
+      setClients(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Client)));
     });
     return () => unsubscribe();
   }, []);
@@ -99,7 +134,7 @@ export default function RequestDetailsModal({ request, onClose }: RequestDetails
     if (!request) return;
 
     const unsubscribe = onSnapshot(collection(db, `requests/${request.id}/items`), (snapshot) => {
-      setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as OrderItem)));
+      setItems(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as OrderItem)));
     });
 
     return () => unsubscribe();
@@ -217,8 +252,9 @@ export default function RequestDetailsModal({ request, onClose }: RequestDetails
         // 2. Map items
         for (const item of items) {
           const itemRef = doc(collection(db, `orders/${orderRef.id}/items`));
+          const { id, ...itemData } = item; // Remove the old ID
           transaction.set(itemRef, {
-            ...item,
+            ...itemData,
             status: item.status || 'Pending' 
           });
         }
@@ -317,9 +353,18 @@ export default function RequestDetailsModal({ request, onClose }: RequestDetails
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">ID: {request.id}</p>
               </div>
             </div>
-            <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-400">
-              <X className="w-6 h-6" />
-            </button>
+            <div className="flex items-center gap-3">
+              <button 
+                onClick={handleCopyToGemini}
+                className="flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 text-indigo-600 rounded-xl font-black uppercase text-[9px] tracking-wider hover:border-indigo-600 hover:bg-indigo-50 transition-all shadow-sm active:scale-95"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                {copied ? 'Скопійовано!' : 'Копіювати для Gemini'}
+              </button>
+              <button onClick={onClose} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-400">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-6 md:p-8">

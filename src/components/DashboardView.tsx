@@ -42,7 +42,7 @@ export default function DashboardView() {
 
   useEffect(() => {
     const unsubOrders = onSnapshot(collection(db, 'orders'), (snapshot) => {
-      const orderData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order));
+      const orderData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Order));
       setOrders(orderData);
       
       const sales = orderData.reduce((acc, curr) => curr.status !== 'Cancelled' ? acc + curr.totalAmount : acc, 0);
@@ -81,7 +81,7 @@ export default function DashboardView() {
     });
 
     const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
-      const productData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+      const productData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product));
       setProducts(productData);
       setStats(prev => ({
         ...prev,
@@ -147,8 +147,8 @@ export default function DashboardView() {
             </select>
           </div>
           
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
+          <div className="h-[300px] w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">

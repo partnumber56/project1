@@ -28,7 +28,9 @@ import {
   Plus,
   Trash2,
   ChevronDown,
-  Printer
+  Printer,
+  Copy,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Order, OrderStatus, OrderItem, ItemStatus, Client } from '../types';
@@ -78,11 +80,46 @@ export default function OrderDetailsModal({ order, onClose }: OrderDetailsModalP
   const [isUpdating, setIsUpdating] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [showClientSuggestions, setShowClientSuggestions] = useState(false);
+  const [copied, setCopied] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const handleCopyToGemini = () => {
+    if (!order) return;
+    const itemsText = items.map((item, index) => {
+      return `${index + 1}. ${item.productName}
+   Артикул: ${item.partNumber || 'н/д'}
+   Бренд: ${item.brand || 'н/д'}
+   Кількість: ${item.quantity} шт.
+   Закупівля: ${formatCurrency(item.costPrice)} | Продаж: ${formatCurrency(item.sellingPrice)}
+   Постачальник: ${item.supplier || 'н/д'} | Доставка: ${item.deliveryTime || 'н/д'}
+   Статус: ${item.status || 'Pending'}`;
+    }).join('\n\n');
+
+    const textToCopy = `Замовлення #${order.id}
+Статус: ${order.status}
+Клієнт: ${order.customerName}
+Телефон: ${order.customerPhone || 'н/д'}
+Автомобіль: ${order.carModel || 'н/д'} ${order.carYear ? `(${order.carYear})` : ''}
+VIN: ${order.vin || 'н/д'}
+Двигун: ${order.engineVolume || 'н/д'}
+
+Товари в замовленні:
+${itemsText}
+
+Загальна сума: ${formatCurrency(order.totalAmount)}
+Очікуваний прибуток: ${formatCurrency(order.totalProfit || 0)}`;
+
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(err => {
+      console.error('Could not copy text: ', err);
+    });
+  };
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'clients'), (snapshot) => {
-      setClients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client)));
+      setClients(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Client)));
     });
     return () => unsubscribe();
   }, []);
@@ -100,7 +137,7 @@ export default function OrderDetailsModal({ order, onClose }: OrderDetailsModalP
   useEffect(() => {
     if (!order) return;
     const unsubscribe = onSnapshot(collection(db, `orders/${order.id}/items`), (snapshot) => {
-      setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as OrderItem)));
+      setItems(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as OrderItem)));
     });
     return () => unsubscribe();
   }, [order]);
@@ -352,6 +389,14 @@ export default function OrderDetailsModal({ order, onClose }: OrderDetailsModalP
               >
                 <Printer className="w-4 h-4" />
                 Друк Накладної
+              </button>
+
+              <button 
+                onClick={handleCopyToGemini}
+                className="flex items-center gap-2 px-6 py-3 bg-white border-2 border-slate-200 text-indigo-600 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:border-indigo-600 hover:bg-indigo-50 transition-all shadow-sm active:scale-95"
+              >
+                {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                {copied ? 'Скопійовано!' : 'Копіювати для Gemini'}
               </button>
             </div>
             <button onClick={onClose} className="p-3 hover:bg-slate-200 rounded-full transition-colors text-slate-400 self-start">

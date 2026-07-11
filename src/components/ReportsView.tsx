@@ -18,7 +18,7 @@ export default function ReportsView() {
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'orders'), (snapshot) => {
-      setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
+      setOrders(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Order)));
     });
     return () => unsubscribe();
   }, []);

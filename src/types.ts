@@ -14,6 +14,7 @@ export interface Product {
   category: string;
   description: string;
   imageUrl?: string;
+  deliveryTime?: string;
 }
 
 export interface Order {
@@ -85,3 +86,14 @@ export interface FinancialTransaction {
   orderId?: string;
   createdAt: Timestamp;
 }
+
+export type Role = 'admin' | 'manager';
+
+export interface UserProfile {
+  id: string; // document id (usually lowercase email)
+  name: string;
+  email: string;
+  role: Role;
+  createdAt: Timestamp;
+}
+

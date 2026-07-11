@@ -78,11 +78,11 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
 
   useEffect(() => {
     const unsubscribeProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
-      setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
+      setProducts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product)));
     });
 
     const unsubscribeClients = onSnapshot(collection(db, 'clients'), (snapshot) => {
-      setClients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client)));
+      setClients(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Client)));
     });
 
     return () => {
@@ -95,7 +95,7 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
     if (selectedClient) {
       const q = collection(db, `clients/${selectedClient.id}/cars`);
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        setClientCars(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Car)));
+        setClientCars(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Car)));
       });
       return () => unsubscribe();
     } else {
@@ -445,6 +445,45 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
                           </motion.div>
                         )}
                       </AnimatePresence>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-500 uppercase ml-1">VIN-код</label>
+                      <div className="relative">
+                        <Fingerprint className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input 
+                          value={vin} 
+                          onChange={e => setVin(e.target.value)} 
+                          className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 text-sm font-mono uppercase" 
+                          placeholder="17 символів" 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-500 uppercase ml-1">Рік випуску</label>
+                      <div className="relative">
+                        <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input 
+                          value={carYear} 
+                          onChange={e => setCarYear(e.target.value)} 
+                          className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 text-sm" 
+                          placeholder="РРРР" 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-500 uppercase ml-1">Об'єм двигуна</label>
+                      <div className="relative">
+                        <Zap className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input 
+                          value={engineVolume} 
+                          onChange={e => setEngineVolume(e.target.value)} 
+                          className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-emerald-500 text-sm" 
+                          placeholder="2.0L, 3.5..." 
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>

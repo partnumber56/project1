@@ -44,7 +44,7 @@ export default function FinanceView() {
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'clients'), (snapshot) => {
-      setClients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client)));
+      setClients(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Client)));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'clients');
     });
@@ -61,7 +61,7 @@ export default function FinanceView() {
       orderBy('createdAt', 'desc')
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setTransactions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as FinancialTransaction)));
+      setTransactions(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as FinancialTransaction)));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `clients/${selectedClient?.id}/transactions`);
     });

@@ -80,10 +80,10 @@ export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalPr
 
   useEffect(() => {
     const unsubscribeProd = onSnapshot(collection(db, 'products'), (snapshot) => {
-      setProducts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product)));
+      setProducts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product)));
     });
     const unsubscribeClients = onSnapshot(collection(db, 'clients'), (snapshot) => {
-      setClients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client)));
+      setClients(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Client)));
     });
     return () => {
       unsubscribeProd();

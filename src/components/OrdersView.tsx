@@ -44,7 +44,7 @@ export default function OrdersView() {
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'orders'), (snapshot) => {
-      setOrders(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Order)));
+      setOrders(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Order)));
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'orders');
     });
@@ -55,11 +55,13 @@ export default function OrdersView() {
     const customerName = (o.customerName || '').toLowerCase();
     const orderId = (o.id || '').toLowerCase();
     const phone = (o.customerPhone || '').toLowerCase();
+    const vin = (o.vin || '').toLowerCase();
     const searchTermLower = searchTerm.toLowerCase();
     
     const matchesSearch = customerName.includes(searchTermLower) || 
                          orderId.includes(searchTermLower) ||
-                         phone.includes(searchTermLower);
+                         phone.includes(searchTermLower) ||
+                         vin.includes(searchTermLower);
     const matchesFilter = filterStatus === 'All' || o.status === filterStatus;
     return matchesSearch && matchesFilter;
   }).sort((a, b) => {
@@ -97,7 +99,7 @@ export default function OrdersView() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input 
               type="text" 
-              placeholder="Ім'я, телефон або ID..." 
+              placeholder="Ім'я, телефон, VIN або ID..." 
               className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
