@@ -45,9 +45,10 @@ interface EditableInputProps {
   type?: 'text' | 'number';
   placeholder?: string;
   className?: string;
+  maxLength?: number;
 }
 
-function EditableInput({ value, onSave, type = 'text', placeholder, className }: EditableInputProps) {
+function EditableInput({ value, onSave, type = 'text', placeholder, className, maxLength }: EditableInputProps) {
   const [localValue, setLocalValue] = useState(String(value === 0 && type === 'number' ? '' : value));
   
   useEffect(() => {
@@ -65,8 +66,10 @@ function EditableInput({ value, onSave, type = 'text', placeholder, className }:
         }
       }}
       placeholder={placeholder}
+      maxLength={maxLength}
       className={cn(
         "w-full px-3 py-1.5 bg-slate-50 border border-transparent focus:border-emerald-500 rounded-lg outline-none",
+        type === 'number' && "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
         className
       )}
     />
@@ -74,12 +77,38 @@ function EditableInput({ value, onSave, type = 'text', placeholder, className }:
 }
 
 export default function RequestDetailsModal({ request, onClose }: RequestDetailsModalProps) {
+
+  const [modalWidth, setModalWidth] = useState(1200);
+
+  const handleResize = (e: any, direction: 'left' | 'right') => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = modalWidth;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const delta = direction === 'right' ? moveEvent.clientX - startX : startX - moveEvent.clientX;
+      setModalWidth(Math.max(800, Math.min(window.innerWidth * 0.95, startWidth + delta * 2)));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
   const [items, setItems] = useState<OrderItem[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [showClientSuggestions, setShowClientSuggestions] = useState(false);
   const [copied, setCopied] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  
+  const calculatedTotal = items.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) * Number(String(i.quantity).replace(',', '.'))), 0);
+  const calculatedProfit = items.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) - Number(String(i.costPrice).replace(',', '.'))) * Number(String(i.quantity).replace(',', '.')), 0);
 
   const handleCopyToGemini = () => {
     if (!request) return;
@@ -103,7 +132,7 @@ VIN: ${request.vin || 'н/д'}
 Запитувані позиції:
 ${itemsText}
 
-Загальна сума: ${formatCurrency(request.totalAmount)}`;
+Загальна сума: ${formatCurrency(calculatedTotal)}`;
 
     navigator.clipboard.writeText(textToCopy).then(() => {
       setCopied(true);
@@ -166,8 +195,8 @@ ${itemsText}
 
       // Recalculate total amount and profit
       const updatedItems = items.map(i => i.id === itemId ? { ...i, [field]: val } : i);
-      const totalAmount = updatedItems.reduce((acc, i) => acc + (Number(i.sellingPrice) * Number(i.quantity)), 0);
-      const totalProfit = updatedItems.reduce((acc, i) => acc + (Number(i.sellingPrice) - Number(i.costPrice)) * Number(i.quantity), 0);
+      const totalAmount = updatedItems.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) * Number(String(i.quantity).replace(',', '.'))), 0);
+      const totalProfit = updatedItems.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) - Number(String(i.costPrice).replace(',', '.'))) * Number(String(i.quantity).replace(',', '.')), 0);
 
       await updateDoc(doc(db, 'requests', request.id), {
         totalAmount,
@@ -341,7 +370,7 @@ ${itemsText}
           initial={{ scale: 0.95, opacity: 0, y: 20 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.95, opacity: 0, y: 20 }}
-          className="relative bg-white w-full max-w-4xl max-h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden"
+          className="relative bg-white w-full max-w-[1400px] max-h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden"
         >
           <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-emerald-50 shrink-0">
             <div className="flex items-center gap-3">
@@ -513,7 +542,7 @@ ${itemsText}
                     <tr>
                       <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Назва</th>
                       <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Артикул / Бренд</th>
-                      <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Срок</th>
+                      <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest w-16">Срок</th>
                       <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest">Постачальник</th>
                       <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest w-20">К-ть</th>
                       <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-widest w-28">Вхід (₴)</th>
@@ -550,8 +579,9 @@ ${itemsText}
                           <EditableInput 
                             value={item.deliveryTime || ''} 
                             onSave={(val) => updateItemField(item.id, 'deliveryTime', val)}
-                            className="text-xs font-bold text-blue-600"
-                            placeholder="н/д"
+                            className="text-xs font-bold text-blue-600 text-center"
+                            placeholder="Срок"
+                            maxLength={2}
                           />
                         </td>
                         <td className="px-3 py-3">
@@ -596,18 +626,20 @@ ${itemsText}
                               "text-[10px] font-black uppercase tracking-tighter py-1 px-2 rounded-lg outline-none border transition-all cursor-pointer",
                               item.status === 'Pending' ? "bg-amber-50 text-amber-600 border-amber-200" :
                               item.status === 'Ordered' ? "bg-purple-50 text-purple-600 border-purple-200" :
+                              item.status === 'In Transit' ? "bg-orange-50 text-orange-600 border-orange-200" :
                               item.status === 'Available' ? "bg-blue-50 text-blue-600 border-blue-200" :
-                              item.status === 'Packed' ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
+                              item.status === 'Confirmed' ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
                               item.status === 'Issued' ? "bg-slate-900 text-white border-slate-900" :
                               "bg-slate-50 text-slate-600 border-slate-200"
                             )}
                           >
                             <option value="Pending">Очікує</option>
                             <option value="Ordered">Замовлено</option>
+                            <option value="In Transit">В дорозі</option>
                             <option value="Available">В наявності</option>
                             <option value="Out of Stock">Немає</option>
                             <option value="Picked">Зібрано</option>
-                            <option value="Packed">Запаковано</option>
+                            <option value="Confirmed">Підтверджено клієнтом</option>
                             <option value="Issued">Видано</option>
                           </select>
                         </td>
@@ -628,7 +660,7 @@ ${itemsText}
                   <span className="text-[10px] font-black uppercase tracking-widest">Разом по запиту</span>
                 </div>
                 <div className="text-right">
-                  <p className="text-2xl font-black text-white">{formatCurrency(request.totalAmount)}</p>
+                  <p className="text-2xl font-black text-white">{formatCurrency(calculatedTotal)}</p>
                 </div>
               </div>
             </div>

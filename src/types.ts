@@ -1,7 +1,7 @@
 import { Timestamp } from 'firebase/firestore';
 
 export type OrderStatus = 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'Cancelled' | 'Request';
-export type ItemStatus = 'Pending' | 'Ordered' | 'Available' | 'Out of Stock' | 'Picked' | 'Packed' | 'Issued';
+export type ItemStatus = 'Pending' | 'Ordered' | 'In Transit' | 'Available' | 'Out of Stock' | 'Picked' | 'Confirmed' | 'Issued';
 
 export interface Product {
   id: string;

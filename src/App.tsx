@@ -51,10 +51,11 @@ import OrdersView from './components/OrdersView';
 import ReportsView from './components/ReportsView';
 import RequestsView from './components/RequestsView';
 import OrderManagementView from './components/OrderManagementView';
+import ClientsView from './components/ClientsView';
 import FinanceView from './components/FinanceView';
 import UserManagementView from './components/UserManagementView';
 
-type View = 'dashboard' | 'inventory' | 'orders' | 'reports' | 'requests' | 'items' | 'finance' | 'users';
+type View = 'dashboard' | 'inventory' | 'orders' | 'reports' | 'requests' | 'items' | 'finance' | 'users' | 'clients';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -135,8 +136,8 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    if (userRole === 'manager' && (activeView === 'finance' || activeView === 'reports' || activeView === 'users')) {
-      setActiveView('dashboard');
+    if (userRole === 'manager' && (activeView === 'dashboard' || activeView === 'reports' || activeView === 'users')) {
+      setActiveView('requests');
     }
   }, [userRole, activeView]);
 
@@ -229,13 +230,15 @@ export default function App() {
         </div>
 
         <nav className="flex-1 p-4 flex flex-col gap-2 overflow-y-auto">
-          <NavItem 
-            icon={<TrendingUp />} 
-            label="Дашборд" 
-            isActive={activeView === 'dashboard'} 
-            expanded={isSidebarOpen} 
-            onClick={() => setActiveView('dashboard')} 
-          />
+          {userRole === 'admin' && (
+            <NavItem 
+              icon={<TrendingUp />} 
+              label="Дашборд" 
+              isActive={activeView === 'dashboard'} 
+              expanded={isSidebarOpen} 
+              onClick={() => setActiveView('dashboard')} 
+            />
+          )}
           <NavItem 
             icon={<FileText />}
             label="Запити" 
@@ -257,15 +260,20 @@ export default function App() {
             expanded={isSidebarOpen} 
             onClick={() => setActiveView('items')} 
           />
-          {userRole === 'admin' && (
-            <NavItem 
-              icon={<Wallet />} // replaced TrendingDown for consistency or add it
-              label="Фінанси" 
-              isActive={activeView === 'finance'} 
-              expanded={isSidebarOpen} 
-              onClick={() => setActiveView('finance')} 
-            />
-          )}
+          <NavItem 
+            icon={<Users />}
+            label="Клієнти" 
+            isActive={activeView === 'clients'} 
+            expanded={isSidebarOpen} 
+            onClick={() => setActiveView('clients')} 
+          />
+          <NavItem 
+            icon={<Wallet />} // replaced TrendingDown for consistency or add it
+            label="Фінанси" 
+            isActive={activeView === 'finance'} 
+            expanded={isSidebarOpen} 
+            onClick={() => setActiveView('finance')} 
+          />
           <NavItem 
             icon={<Package />} 
             label="Склад" 
@@ -397,12 +405,13 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2 }}
             >
-              {activeView === 'dashboard' && <DashboardView />}
+              {activeView === 'dashboard' && userRole === 'admin' && <DashboardView />}
               {activeView === 'requests' && <RequestsView />}
               {activeView === 'inventory' && <InventoryView />}
               {activeView === 'orders' && <OrdersView />}
               {activeView === 'items' && <OrderManagementView />}
-              {activeView === 'finance' && userRole === 'admin' && <FinanceView />}
+              {activeView === 'clients' && <ClientsView />}
+              {activeView === 'finance' && <FinanceView />}
               {activeView === 'reports' && userRole === 'admin' && <ReportsView />}
               {activeView === 'users' && userRole === 'admin' && <UserManagementView currentUserEmail={user.email || ''} />}
             </motion.div>

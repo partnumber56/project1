@@ -157,9 +157,10 @@ export default function OrderManagementView() {
     switch (status) {
       case 'Pending': return 'bg-amber-50 text-amber-600 border-amber-200';
       case 'Ordered': return 'bg-purple-50 text-purple-600 border-purple-200';
+      case 'In Transit': return 'bg-orange-50 text-orange-600 border-orange-200';
       case 'Available': return 'bg-blue-50 text-blue-600 border-blue-200';
       case 'Picked': return 'bg-indigo-50 text-indigo-600 border-indigo-200';
-      case 'Packed': return 'bg-emerald-50 text-emerald-600 border-emerald-200';
+      case 'Confirmed': return 'bg-emerald-50 text-emerald-600 border-emerald-200';
       case 'Issued': return 'bg-slate-900 text-white border-slate-900';
       case 'Out of Stock': return 'bg-rose-50 text-rose-600 border-rose-200';
       default: return 'bg-slate-50 text-slate-600 border-slate-200';
@@ -169,6 +170,7 @@ export default function OrderManagementView() {
   const stats = {
     pending: items.filter(i => i.status === 'Pending').length,
     ordered: items.filter(i => i.status === 'Ordered').length,
+    inTransit: items.filter(i => i.status === 'In Transit').length,
     available: items.filter(i => i.status === 'Available').length
   };
 
@@ -184,6 +186,7 @@ export default function OrderManagementView() {
           {[
             { label: 'Очікує', count: stats.pending, color: 'bg-amber-500', bg: 'bg-amber-50' },
             { label: 'Замовлено', count: stats.ordered, color: 'bg-purple-500', bg: 'bg-purple-50' },
+            { label: 'В дорозі', count: stats.inTransit, color: 'bg-orange-500', bg: 'bg-orange-50' },
             { label: 'На складі', count: stats.available, color: 'bg-blue-500', bg: 'bg-blue-50' },
           ].map((stat, idx) => (
             <div key={idx} className={cn("px-4 py-2 rounded-xl border border-slate-100 shadow-sm flex items-center gap-3", stat.bg)}>
@@ -219,9 +222,10 @@ export default function OrderManagementView() {
               <option value="All">Всі статуси</option>
               <option value="Pending">Очікує</option>
               <option value="Ordered">Замовлено</option>
+              <option value="In Transit">В дорозі</option>
               <option value="Available">В наявності</option>
               <option value="Picked">Зібрано</option>
-              <option value="Packed">Запаковано</option>
+              <option value="Confirmed">Підтверджено клієнтом</option>
               <option value="Issued">Видано</option>
               <option value="Out of Stock">Немає</option>
             </select>
@@ -344,9 +348,10 @@ export default function OrderManagementView() {
                       >
                         <option value="Pending">Очікує</option>
                         <option value="Ordered">Замовлено</option>
+                        <option value="In Transit">В дорозі</option>
                         <option value="Available">В наявності</option>
                         <option value="Picked">Зібрано</option>
-                        <option value="Packed">Запаковано</option>
+                        <option value="Confirmed">Підтверджено клієнтом</option>
                         <option value="Issued">Видано</option>
                         <option value="Out of Stock">Немає</option>
                       </select>

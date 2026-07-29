@@ -27,11 +27,12 @@ import {
   Package,
   User,
   Calendar,
-  X
+  X,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Order, OrderStatus, Product, OrderItem } from '../types';
-import { cn, formatCurrency } from '../lib/utils';
+import { cn, formatCurrency, exportToCSV } from '../lib/utils';
 import CreateOrderModal from './CreateOrderModal';
 import OrderDetailsModal from './OrderDetailsModal';
 
@@ -90,6 +91,21 @@ export default function OrdersView() {
     }
   };
 
+  const handleExport = () => {
+    const headers = ['ID', 'Клієнт', 'Телефон', 'Авто', 'VIN', 'Статус', 'Сума', 'Дата'];
+    const data = filteredOrders.map(o => [
+      o.id,
+      o.customerName,
+      o.customerPhone || '',
+      o.carModel || '',
+      o.vin || '',
+      o.status,
+      o.totalAmount,
+      o.createdAt?.toDate ? `${o.createdAt.toDate().toLocaleDateString('uk-UA')} ${o.createdAt.toDate().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}` : ''
+    ]);
+    exportToCSV(`orders_${new Date().toLocaleDateString('uk-UA')}`, headers, data);
+  };
+
   return (
     <div className="space-y-6">
       {/* Search & Filter */}
@@ -122,13 +138,22 @@ export default function OrdersView() {
           </div>
         </div>
         
-        <button 
-          onClick={() => setIsCreateOpen(true)}
-          className="w-full sm:w-auto px-6 py-2.5 bg-slate-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-900/10"
-        >
-          <Plus className="w-5 h-5" />
-          Нове замовлення
-        </button>
+        <div className="flex gap-2 w-full lg:w-auto">
+          <button 
+            onClick={handleExport}
+            className="w-full sm:w-auto px-4 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-sm"
+          >
+            <Download className="w-5 h-5" />
+            <span className="hidden sm:inline">Експорт</span>
+          </button>
+          <button 
+            onClick={() => setIsCreateOpen(true)}
+            className="w-full sm:w-auto px-6 py-2.5 bg-slate-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-all active:scale-95 shadow-lg shadow-slate-900/10"
+          >
+            <Plus className="w-5 h-5" />
+            Нове замовлення
+          </button>
+        </div>
       </div>
 
       {/* Orders Grid */}

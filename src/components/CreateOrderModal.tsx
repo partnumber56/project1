@@ -29,7 +29,7 @@ import {
   Zap,
   Tag,
   Building2,
-  ChevronDown
+  ChevronDown, ClipboardList
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, OrderItem, ItemStatus, Client } from '../types';
@@ -55,6 +55,28 @@ interface NewOrderItem {
 }
 
 export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
+
+  const [modalWidth, setModalWidth] = useState(1200);
+
+  const handleResize = (e: any, direction: 'left' | 'right') => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = modalWidth;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const delta = direction === 'right' ? moveEvent.clientX - startX : startX - moveEvent.clientX;
+      setModalWidth(Math.max(800, Math.min(window.innerWidth * 0.95, startWidth + delta * 2)));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSupplier, setSelectedSupplier] = useState<string>('all');
@@ -74,9 +96,92 @@ export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalPr
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Order Items Table
+  const generateEmptyRow = (): NewOrderItem => ({
+    id: Math.random().toString(36).substr(2, 9),
+    partNumber: '',
+    brand: '',
+    productName: '',
+    quantity: 1,
+    costPrice: '',
+    sellingPrice: '',
+    supplier: '',
+    status: 'Pending'
+  });
+
+  const getInitialItems = () => Array.from({ length: 5 }, generateEmptyRow);
+
   const [items, setItems] = useState<NewOrderItem[]>([]);
   
+  
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  const [isPastingList, setIsPastingList] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  
+  const handleParseList = () => {
+    const lines = pasteText.split('\n');
+    const newItems = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (trimmed.endsWith(':')) continue;
+      
+      let qty = 1;
+      let partNumber = '';
+      let name = trimmed;
+      
+      const qtyMatch = name.match(/(\d+)\s*шт\.?/i);
+      if (qtyMatch) {
+        qty = parseInt(qtyMatch[1], 10);
+        name = name.replace(qtyMatch[0], '').trim();
+      }
+      
+      const words = name.split(/\s+/);
+      const partMatch = words.find(w => /^[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+$/.test(w) || (/^[A-Za-z0-9]{8,}$/.test(w) && /\d/.test(w)));
+      
+      if (partMatch) {
+        partNumber = partMatch;
+        name = name.replace(partMatch, '').trim();
+      }
+      
+      name = name.replace(/^[-.,]+|[-.,]+$/g, '').trim();
+      
+      newItems.push({
+        id: Date.now().toString() + Math.random().toString(),
+        partNumber: partNumber.toUpperCase(),
+        brand: '',
+        productName: name || 'Запчастина',
+        quantity: qty,
+        costPrice: '',
+        sellingPrice: '',
+        supplier: '',
+        status: 'Pending'
+      });
+    }
+    
+    if (newItems.length > 0) {
+      const filteredItems = items.filter(i => i.partNumber || i.productName);
+      setItems([...filteredItems, ...newItems]);
+    }
+    
+    setIsPastingList(false);
+    setPasteText('');
+  };
+
+
+  useEffect(() => {
+    if (isOpen) {
+      if (items.length === 0) {
+        setItems(getInitialItems());
+      }
+    } else {
+      setItems([]);
+      setCustomerName('');
+      setCustomerPhone('');
+      setSelectedClient(null);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     const unsubscribeProd = onSnapshot(collection(db, 'products'), (snapshot) => {
@@ -109,8 +214,8 @@ export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalPr
   };
 
   const totalAmount = items.reduce((acc, item) => {
-    const price = item.sellingPrice === '' ? 0 : Number(item.sellingPrice);
-    return acc + (price * item.quantity);
+    const price = item.sellingPrice === '' ? 0 : Number(String(item.sellingPrice).replace(',', '.'));
+    return acc + (price * Number(String(item.quantity).replace(',', '.')));
   }, 0);
 
   const addNewRow = () => {
@@ -140,7 +245,7 @@ export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalPr
       // Check if item already exists in the table to avoid duplicates
       const existing = prev.find(i => i.productId === product.id);
       if (existing) {
-        return prev.map(i => i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i);
+        return prev.map(i => i.id === existing.id ? { ...i, quantity: Number(String(i.quantity).replace(',', '.')) + 1 } : i);
       }
 
       return [...prev, {
@@ -164,9 +269,9 @@ export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalPr
     setIsSubmitting(true);
 
     const totalProfit = items.reduce((acc, i) => {
-      const sp = i.sellingPrice === '' ? 0 : Number(i.sellingPrice);
-      const cp = i.costPrice === '' ? 0 : Number(i.costPrice);
-      return acc + (sp - cp) * i.quantity;
+      const sp = i.sellingPrice === '' ? 0 : Number(String(i.sellingPrice).replace(',', '.'));
+      const cp = i.costPrice === '' ? 0 : Number(String(i.costPrice).replace(',', '.'));
+      return acc + (sp - cp) * Number(String(i.quantity).replace(',', '.'));
     }, 0);
 
     const path = 'orders';
@@ -218,9 +323,9 @@ export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalPr
             partNumber: item.partNumber,
             brand: item.brand,
             productName: item.productName,
-            quantity: item.quantity,
-            costPrice: Number(item.costPrice),
-            sellingPrice: Number(item.sellingPrice),
+            quantity: Number(String(item.quantity).replace(',', '.')),
+            costPrice: Number(String(item.costPrice).replace(',', '.')),
+            sellingPrice: Number(String(item.sellingPrice).replace(',', '.')),
             supplier: item.supplier || '',
             deliveryTime: item.deliveryTime || '',
             status: item.status
@@ -232,7 +337,7 @@ export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalPr
             const productSnap = await transaction.get(productRef);
             if (productSnap.exists()) {
               const currentStock = productSnap.data().stock || 0;
-              const newStock = Math.max(0, currentStock - item.quantity);
+              const newStock = Math.max(0, currentStock - Number(String(item.quantity).replace(',', '.')));
               transaction.update(productRef, { stock: newStock });
             }
           }
@@ -285,8 +390,19 @@ export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalPr
             initial={{ scale: 0.95, opacity: 0, y: 20 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.95, opacity: 0, y: 20 }}
-            className="relative bg-white w-full max-w-6xl h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden"
+            style={{ maxWidth: `${modalWidth}px` }}
+            className="relative bg-white w-full h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden"
           >
+            
+            {/* Resize Handles */}
+            <div 
+              className="absolute top-0 left-0 w-3 h-full cursor-col-resize z-50 hover:bg-blue-500/20 transition-colors"
+              onMouseDown={(e) => handleResize(e, 'left')}
+            />
+            <div 
+              className="absolute top-0 right-0 w-3 h-full cursor-col-resize z-50 hover:bg-blue-500/20 transition-colors"
+              onMouseDown={(e) => handleResize(e, 'right')}
+            />
             {/* Header */}
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
               <div className="flex items-center gap-3">
@@ -417,31 +533,70 @@ export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalPr
                       <Tag className="w-4 h-4" />
                       Позиції замовлення
                     </h4>
-                    <button type="button" onClick={addNewRow} className="flex items-center gap-2 text-blue-600 text-sm font-bold hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors">
-                      <Plus className="w-4 h-4" />
-                      Додати рядок
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => setIsPastingList(!isPastingList)} className={cn("flex items-center gap-2 text-sm font-bold px-3 py-1.5 rounded-lg transition-colors", isPastingList ? "bg-emerald-50 text-emerald-700" : "text-emerald-600 hover:bg-emerald-50")}>
+                        <ClipboardList className="w-4 h-4" />
+                        {isPastingList ? 'Сховати' : 'Вставити список'}
+                      </button>
+                      <button type="button" onClick={addNewRow} className="flex items-center gap-2 text-blue-600 text-sm font-bold hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors">
+                        <Plus className="w-4 h-4" />
+                        Додати рядок
+                      </button>
+                    </div>
                   </div>
+                  
+                  <AnimatePresence>
+                    {isPastingList && (
+                      <motion.div 
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="p-6 bg-emerald-50/50 border-b border-slate-100 space-y-3">
+                          <label className="text-xs font-bold text-emerald-800 uppercase tracking-widest flex items-center gap-2">
+                            Швидке додавання текстом
+                            <span className="text-[10px] font-medium normal-case opacity-70 bg-emerald-100 px-2 py-0.5 rounded-full">З Viber або Telegram</span>
+                          </label>
+                          <textarea
+                            value={pasteText}
+                            onChange={(e) => setPasteText(e.target.value)}
+                            placeholder="Вставте список запчастин (напр: 12290rwca01 4шт)"
+                            className="w-full h-32 p-4 bg-white border border-emerald-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm resize-y"
+                          />
+                          <div className="flex justify-end">
+                            <button type="button" onClick={handleParseList} disabled={!pasteText.trim()} className="px-6 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-500/20 hover:bg-emerald-700 transition-all disabled:opacity-50 flex items-center gap-2">
+                              <ClipboardList className="w-4 h-4" />
+                              Обробити список
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                   
                   <div className="overflow-x-auto">
                     <table className="w-full text-left">
                       <thead className="bg-slate-50">
                         <tr>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Артикул</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Бренд</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Назва</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">К-ть</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Вхід (₴)</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Продаж (₴)</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Срок</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Постачальник</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Статус</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter"></th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-full min-w-[200px]">Назва</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-48">Артикул</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-32">Бренд</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-16">К-ть</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-24">Вхід (₴)</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-24">Продаж (₴)</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-16">Срок</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-32">Постачальник</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-28">Статус</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-10"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {items.map((item, index) => (
                           <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-3 py-2">
+                              <input value={item.productName} onChange={e => updateItem(item.id, 'productName', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-blue-500 text-xs" placeholder="Назва запчастини" />
+                            </td>
                             <td className="px-3 py-2">
                               <input value={item.partNumber} onChange={e => updateItem(item.id, 'partNumber', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-blue-500 text-xs font-mono uppercase" placeholder="SKU" />
                             </td>
@@ -449,19 +604,16 @@ export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalPr
                               <input value={item.brand} onChange={e => updateItem(item.id, 'brand', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-blue-500 text-xs" placeholder="Виробник" />
                             </td>
                             <td className="px-3 py-2">
-                              <input value={item.productName} onChange={e => updateItem(item.id, 'productName', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-blue-500 text-xs" placeholder="Назва запчастини" />
-                            </td>
-                            <td className="px-3 py-2 w-16">
-                              <input type="number" value={item.quantity} onChange={e => updateItem(item.id, 'quantity', parseInt(e.target.value) || 1)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-blue-500 text-xs text-center" />
-                            </td>
-                            <td className="px-3 py-2 w-24">
-                              <input type="number" value={item.costPrice} onChange={e => updateItem(item.id, 'costPrice', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-blue-500 text-xs" />
-                            </td>
-                            <td className="px-3 py-2 w-24">
-                              <input type="number" value={item.sellingPrice} onChange={e => updateItem(item.id, 'sellingPrice', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-blue-500 text-xs font-bold text-slate-900" />
+                              <input type="text" value={Number(String(item.quantity).replace(',', '.'))} onChange={e => updateItem(item.id, 'quantity', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-blue-500 text-xs text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                             </td>
                             <td className="px-3 py-2">
-                              <input value={item.deliveryTime || ''} onChange={e => updateItem(item.id, 'deliveryTime', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-blue-500 text-xs font-bold text-blue-600" placeholder="Срок" />
+                              <input type="text" value={item.costPrice} onChange={e => updateItem(item.id, 'costPrice', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-blue-500 text-xs [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input type="text" value={item.sellingPrice} onChange={e => updateItem(item.id, 'sellingPrice', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-blue-500 text-xs font-bold text-slate-900 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input value={item.deliveryTime || ''} onChange={e => updateItem(item.id, 'deliveryTime', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-blue-500 text-xs font-bold text-blue-600 uppercase text-center" placeholder="Срок" maxLength={2} />
                             </td>
                             <td className="px-3 py-2">
                               <input value={item.supplier} onChange={e => updateItem(item.id, 'supplier', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-blue-500 text-xs" placeholder="Постачальник" />
@@ -474,20 +626,22 @@ export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalPr
                                   "w-full px-2 py-1.5 rounded-lg outline-none border text-[10px] font-black uppercase tracking-tighter transition-all cursor-pointer",
                                   item.status === 'Pending' ? "bg-amber-50 text-amber-600 border-amber-100" :
                                   item.status === 'Ordered' ? "bg-purple-50 text-purple-600 border-purple-100" :
+                                  item.status === 'In Transit' ? "bg-orange-50 text-orange-600 border-orange-100" :
                                   item.status === 'Available' ? "bg-blue-50 text-blue-600 border-blue-100" :
                                   item.status === 'Out of Stock' ? "bg-rose-50 text-rose-600 border-rose-100" :
                                   item.status === 'Picked' ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
-                                  item.status === 'Packed' ? "bg-indigo-50 text-indigo-600 border-indigo-100" :
+                                  item.status === 'Confirmed' ? "bg-indigo-50 text-indigo-600 border-indigo-100" :
                                   item.status === 'Issued' ? "bg-slate-900 text-white border-slate-900" :
                                   "bg-slate-50 text-slate-500 border-slate-200"
                                 )}
                               >
                                 <option value="Pending">Очікує</option>
                                 <option value="Ordered">Замовлено</option>
+                                <option value="In Transit">В дорозі</option>
                                 <option value="Available">В наявності</option>
                                 <option value="Out of Stock">Немає</option>
                                 <option value="Picked">Зібрано</option>
-                                <option value="Packed">Запаковано</option>
+                                <option value="Confirmed">Підтверджено клієнтом</option>
                                 <option value="Issued">Видано</option>
                               </select>
                             </td>
@@ -513,9 +667,9 @@ export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalPr
                         <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Прибуток (EST)</p>
                         <p className="text-lg font-bold text-emerald-400">
                           {formatCurrency(items.reduce((acc, i) => {
-                            const sp = i.sellingPrice === '' ? 0 : Number(i.sellingPrice);
-                            const cp = i.costPrice === '' ? 0 : Number(i.costPrice);
-                            return acc + (sp - cp) * i.quantity;
+                            const sp = i.sellingPrice === '' ? 0 : Number(String(i.sellingPrice).replace(',', '.'));
+                            const cp = i.costPrice === '' ? 0 : Number(String(i.costPrice).replace(',', '.'));
+                            return acc + (sp - cp) * Number(String(i.quantity).replace(',', '.'));
                           }, 0))}
                         </p>
                       </div>

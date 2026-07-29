@@ -23,12 +23,13 @@ import {
   DollarSign,
   X,
   Upload,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Download
 } from 'lucide-react';
 import { read, utils } from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product } from '../types';
-import { cn, formatCurrency } from '../lib/utils';
+import { cn, formatCurrency, exportToCSV } from '../lib/utils';
 
 export default function InventoryView() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -189,6 +190,21 @@ export default function InventoryView() {
     reader.readAsBinaryString(file);
   };
 
+  const handleExport = () => {
+    const headers = ['ID', 'Назва', 'SKU', 'Бренд', 'Постачальник', 'К-ть', 'Ціна', 'Категорія'];
+    const data = filteredProducts.map(p => [
+      p.id,
+      p.name,
+      p.sku,
+      p.brand || '',
+      p.supplier || '',
+      p.stock,
+      p.price,
+      p.category
+    ]);
+    exportToCSV(`inventory_${new Date().toLocaleDateString('uk-UA')}`, headers, data);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -219,6 +235,14 @@ export default function InventoryView() {
         </div>
         
         <div className="flex items-center gap-3">
+          <button 
+            onClick={handleExport}
+            className="flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-slate-700 font-semibold py-2 px-4 rounded-xl border border-slate-200 shadow-sm active:scale-95 transition-all whitespace-nowrap"
+          >
+            <Download className="w-5 h-5" />
+            <span className="hidden sm:inline">Експорт</span>
+          </button>
+          
           <input 
             type="file" 
             ref={fileInputRef}
@@ -229,7 +253,7 @@ export default function InventoryView() {
           <button 
             disabled={isImporting}
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-slate-700 font-semibold py-2 px-6 rounded-xl border border-slate-200 shadow-sm active:scale-95 transition-all whitespace-nowrap disabled:opacity-50"
+            className="flex items-center justify-center gap-2 bg-white hover:bg-slate-50 text-slate-700 font-semibold py-2 px-4 rounded-xl border border-slate-200 shadow-sm active:scale-95 transition-all whitespace-nowrap disabled:opacity-50"
           >
             {isImporting ? (
               <div className="w-5 h-5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />

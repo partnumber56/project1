@@ -76,12 +76,38 @@ function EditableInput({ value, onSave, type = 'text', placeholder, className }:
 }
 
 export default function OrderDetailsModal({ order, onClose }: OrderDetailsModalProps) {
+
+  const [modalWidth, setModalWidth] = useState(1200);
+
+  const handleResize = (e: any, direction: 'left' | 'right') => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = modalWidth;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const delta = direction === 'right' ? moveEvent.clientX - startX : startX - moveEvent.clientX;
+      setModalWidth(Math.max(800, Math.min(window.innerWidth * 0.95, startWidth + delta * 2)));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
   const [items, setItems] = useState<OrderItem[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [showClientSuggestions, setShowClientSuggestions] = useState(false);
   const [copied, setCopied] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  
+  const calculatedTotal = items.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) * Number(String(i.quantity).replace(',', '.'))), 0);
+  const calculatedProfit = items.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) - Number(String(i.costPrice).replace(',', '.'))) * Number(String(i.quantity).replace(',', '.')), 0);
 
   const handleCopyToGemini = () => {
     if (!order) return;
@@ -106,8 +132,8 @@ VIN: ${order.vin || 'н/д'}
 Товари в замовленні:
 ${itemsText}
 
-Загальна сума: ${formatCurrency(order.totalAmount)}
-Очікуваний прибуток: ${formatCurrency(order.totalProfit || 0)}`;
+Загальна сума: ${formatCurrency(calculatedTotal)}
+Очікуваний прибуток: ${formatCurrency(calculatedProfit || 0)}`;
 
     navigator.clipboard.writeText(textToCopy).then(() => {
       setCopied(true);
@@ -144,10 +170,6 @@ ${itemsText}
 
   const updateOrderStatus = async (newStatus: OrderStatus) => {
     if (!order) return;
-    if (order.status === 'Delivered' || order.status === 'Cancelled') {
-      alert('Неможливо змінити статус уже завершеного або скасованого замовлення');
-      return;
-    }
     setIsUpdating(true);
     try {
       await runTransaction(db, async (transaction) => {
@@ -169,20 +191,44 @@ ${itemsText}
             if (clientSnap.exists()) {
               const clientData = clientSnap.data();
               transaction.update(clientRef, {
-                balance: (clientData.balance || 0) - (currentOrder.totalAmount || 0),
-                totalTurnover: (clientData.totalTurnover || 0) + (currentOrder.totalAmount || 0)
+                balance: (clientData.balance || 0) - (calculatedTotal || 0),
+                totalTurnover: (clientData.totalTurnover || 0) + (calculatedTotal || 0)
               });
 
               const txRef = doc(collection(db, `clients/${currentOrder.clientId}/transactions`));
               transaction.set(txRef, {
                 clientId: currentOrder.clientId,
-                amount: -(currentOrder.totalAmount || 0),
+                amount: -(calculatedTotal || 0),
                 type: 'Order',
                 description: `Замовлення #${order.id}`,
                 orderId: order.id,
                 createdAt: serverTimestamp()
               });
               updates.isFinancialProcessed = true;
+            }
+          }
+        } else if (currentOrder.status === 'Delivered' && newStatus !== 'Delivered' && currentOrder.isFinancialProcessed) {
+          // Rollback financial transaction if moving away from Delivered
+          if (currentOrder.clientId) {
+            const clientRef = doc(db, 'clients', currentOrder.clientId);
+            const clientSnap = await transaction.get(clientRef);
+            if (clientSnap.exists()) {
+              const clientData = clientSnap.data();
+              transaction.update(clientRef, {
+                balance: (clientData.balance || 0) + (calculatedTotal || 0),
+                totalTurnover: (clientData.totalTurnover || 0) - (calculatedTotal || 0)
+              });
+
+              const txRef = doc(collection(db, `clients/${currentOrder.clientId}/transactions`));
+              transaction.set(txRef, {
+                clientId: currentOrder.clientId,
+                amount: (calculatedTotal || 0),
+                type: 'Refund',
+                description: `Скасування статусу (Повернення) #${order.id}`,
+                orderId: order.id,
+                createdAt: serverTimestamp()
+              });
+              updates.isFinancialProcessed = false;
             }
           }
         }
@@ -198,10 +244,6 @@ ${itemsText}
 
   const updateItemStatus = async (itemId: string, newStatus: ItemStatus) => {
     if (!order) return;
-    if (order.status === 'Delivered' || order.status === 'Cancelled') {
-      alert('Неможливо змінити статус позиції у завершеному або скасованому замовленні');
-      return;
-    }
     try {
       await updateDoc(doc(db, `orders/${order.id}/items`, itemId), {
         status: newStatus
@@ -262,8 +304,8 @@ ${itemsText}
 
       // Recalculate totals using the latest available items state
       const updatedItems = items.map(i => i.id === itemId ? { ...i, [field]: val } : i);
-      const totalAmount = updatedItems.reduce((acc, i) => acc + (Number(i.sellingPrice) * Number(i.quantity)), 0);
-      const totalProfit = updatedItems.reduce((acc, i) => acc + (Number(i.sellingPrice) - Number(i.costPrice)) * Number(i.quantity), 0);
+      const totalAmount = updatedItems.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) * Number(String(i.quantity).replace(',', '.'))), 0);
+      const totalProfit = updatedItems.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) - Number(String(i.costPrice).replace(',', '.'))) * Number(String(i.quantity).replace(',', '.')), 0);
 
       await updateDoc(doc(db, 'orders', order.id), {
         totalAmount,
@@ -308,8 +350,8 @@ ${itemsText}
       await deleteDoc(doc(db, `orders/${order.id}/items`, itemId));
       
       const updatedItems = items.filter(i => i.id !== itemId);
-      const totalAmount = updatedItems.reduce((acc, i) => acc + (Number(i.sellingPrice) * Number(i.quantity)), 0);
-      const totalProfit = updatedItems.reduce((acc, i) => acc + (Number(i.sellingPrice) - Number(i.costPrice)) * Number(i.quantity), 0);
+      const totalAmount = updatedItems.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) * Number(String(i.quantity).replace(',', '.'))), 0);
+      const totalProfit = updatedItems.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) - Number(String(i.costPrice).replace(',', '.'))) * Number(String(i.quantity).replace(',', '.')), 0);
 
       await updateDoc(doc(db, 'orders', order.id), {
         totalAmount,
@@ -352,21 +394,32 @@ ${itemsText}
   if (!order) return null;
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:static print:block print:p-0 print:bg-white print:overflow-visible print:h-auto print:w-full">
         <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           onClick={onClose}
-          className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+          className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm print:hidden"
         />
         <motion.div
           initial={{ scale: 0.95, opacity: 0, y: 20 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.95, opacity: 0, y: 20 }}
-          className="relative bg-white w-full max-w-4xl h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden"
+          style={{ maxWidth: `${modalWidth}px` }}
+            className="relative bg-white w-full h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden print:hidden"
         >
-          {/* Header */}
+          
+            {/* Resize Handles */}
+            <div 
+              className="absolute top-0 left-0 w-3 h-full cursor-col-resize z-50 hover:bg-blue-500/20 transition-colors"
+              onMouseDown={(e) => handleResize(e, 'left')}
+            />
+            <div 
+              className="absolute top-0 right-0 w-3 h-full cursor-col-resize z-50 hover:bg-blue-500/20 transition-colors"
+              onMouseDown={(e) => handleResize(e, 'right')}
+            />
+            {/* Header */}
           <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0 no-print">
             <div className="flex items-center gap-6">
               <div>
@@ -508,18 +561,20 @@ ${itemsText}
                                   "text-[10px] font-black uppercase tracking-tighter py-1 px-2 rounded-lg outline-none border transition-all",
                                   item.status === 'Pending' ? "bg-amber-50 text-amber-600 border-amber-200" :
                                   item.status === 'Ordered' ? "bg-purple-50 text-purple-600 border-purple-200" :
+                                  item.status === 'In Transit' ? "bg-orange-50 text-orange-600 border-orange-200" :
                                   item.status === 'Available' ? "bg-blue-50 text-blue-600 border-blue-200" :
-                                  item.status === 'Packed' ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
+                                  item.status === 'Confirmed' ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
                                   item.status === 'Issued' ? "bg-slate-900 text-white border-slate-900" :
                                   "bg-slate-50 text-slate-600 border-slate-200"
                                 )}
                               >
                                 <option value="Pending">Очікує</option>
                                 <option value="Ordered">Замовлено</option>
+                                <option value="In Transit">В дорозі</option>
                                 <option value="Available">В наявності</option>
                                 <option value="Out of Stock">Немає</option>
                                 <option value="Picked">Зібрано</option>
-                                <option value="Packed">Запаковано</option>
+                                <option value="Confirmed">Підтверджено клієнтом</option>
                                 <option value="Issued">Видано</option>
                               </select>
                             </td>
@@ -535,7 +590,7 @@ ${itemsText}
                   </div>
                   <div className="p-6 bg-slate-50 flex items-center justify-between border-t border-slate-100">
                     <span className="text-slate-500 font-bold uppercase text-xs tracking-widest">Всього до сплати</span>
-                    <span className="text-2xl font-black text-slate-900">{formatCurrency(order.totalAmount)}</span>
+                    <span className="text-2xl font-black text-slate-900">{formatCurrency(calculatedTotal)}</span>
                   </div>
                 </div>
 
@@ -705,11 +760,17 @@ ${itemsText}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between text-xs font-bold text-blue-800">
                       <span>Прибуток (EST)</span>
-                      <span>{formatCurrency(items.reduce((acc, i) => acc + (i.sellingPrice - i.costPrice) * i.quantity, 0))}</span>
+                      <span>{formatCurrency(items.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) - Number(String(i.costPrice).replace(',', '.'))) * Number(String(i.quantity).replace(',', '.')), 0))}</span>
                     </div>
                     <div className="flex items-center justify-between text-[10px] text-blue-500 uppercase font-black">
                       <span>Дата створення</span>
-                      <span>{order.createdAt?.toDate ? order.createdAt.toDate().toLocaleDateString('uk-UA') : '-'}</span>
+                      <span>
+                        {order.createdAt?.toDate ? (
+                          <>
+                            {order.createdAt.toDate().toLocaleDateString('uk-UA')} <span className="opacity-70 ml-1">{order.createdAt.toDate().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}</span>
+                          </>
+                        ) : '-'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -719,7 +780,7 @@ ${itemsText}
         </motion.div>
 
         {/* Hidden Print Content */}
-        <div id="print-area" className="hidden print:block p-10 bg-white min-h-screen text-slate-900">
+        <div id="print-area" className="hidden print:block p-10 bg-white min-h-screen text-slate-900 print:absolute print:inset-0 print:w-full print:h-auto print:overflow-visible">
           {/* Invoice Header */}
           <div className="flex justify-between items-start mb-12 border-b-4 border-slate-900 pb-10">
             <div>
@@ -759,24 +820,19 @@ ${itemsText}
           <table className="w-full mb-12 text-left border-collapse">
             <thead>
               <tr className="border-b-2 border-slate-900 border-t-2">
-                <th className="py-5 px-4 text-xs font-black uppercase tracking-widest text-slate-500">Позиція / Артикул</th>
-                <th className="py-5 px-4 text-xs font-black uppercase tracking-widest text-slate-500 text-center">К-ть</th>
-                <th className="py-5 px-4 text-xs font-black uppercase tracking-widest text-slate-500 text-right">Ціна (₴)</th>
-                <th className="py-5 px-4 text-xs font-black uppercase tracking-widest text-slate-500 text-right">Сума (₴)</th>
+                <th className="py-5 px-4 text-xs font-black uppercase tracking-widest text-slate-500">Назва</th>
+                <th className="py-5 px-4 text-xs font-black uppercase tracking-widest text-slate-500">Бренд</th>
+                <th className="py-5 px-4 text-xs font-black uppercase tracking-widest text-slate-500 text-right">Ціна продажу (₴)</th>
+                <th className="py-5 px-4 text-xs font-black uppercase tracking-widest text-slate-500 text-center">Кількість</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {items.map((item, index) => (
                 <tr key={item.id} className="page-break-inside-avoid">
-                  <td className="py-6 px-4">
-                    <p className="font-bold text-slate-900 text-sm mb-1">{index + 1}. {item.productName || 'Запчастина'}</p>
-                    <p className="text-[10px] font-mono font-bold text-slate-400 uppercase">
-                      {item.partNumber || '-'} {item.brand ? `/ ${item.brand}` : ''}
-                    </p>
-                  </td>
-                  <td className="py-6 px-4 text-center font-black text-sm text-slate-900">{item.quantity}</td>
+                  <td className="py-6 px-4 font-bold text-slate-900 text-sm">{item.productName || 'Запчастина'}</td>
+                  <td className="py-6 px-4 font-bold text-slate-900 text-sm">{item.brand || '-'}</td>
                   <td className="py-6 px-4 text-right font-bold text-sm text-slate-900">{formatCurrency(item.sellingPrice)}</td>
-                  <td className="py-6 px-4 text-right font-black text-sm text-slate-900">{formatCurrency(item.sellingPrice * item.quantity)}</td>
+                  <td className="py-6 px-4 text-center font-black text-sm text-slate-900">{item.quantity}</td>
                 </tr>
               ))}
             </tbody>
@@ -791,7 +847,7 @@ ${itemsText}
               </div>
               <div className="flex justify-between items-center bg-slate-900 p-6 rounded-2xl text-white shadow-xl">
                 <span className="text-xs font-black uppercase tracking-widest">Разом до сплати:</span>
-                <span className="text-3xl font-black">{formatCurrency(order.totalAmount)}</span>
+                <span className="text-3xl font-black">{formatCurrency(calculatedTotal)}</span>
               </div>
             </div>
           </div>

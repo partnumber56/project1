@@ -27,7 +27,7 @@ import {
   Tag,
   Building2,
   FileText,
-  ChevronDown
+  ChevronDown, ClipboardList
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, ItemStatus, Client, Car } from '../types';
@@ -53,6 +53,28 @@ interface NewRequestItem {
 }
 
 export default function CreateRequestModal({ isOpen, onClose }: CreateRequestModalProps) {
+
+  const [modalWidth, setModalWidth] = useState(1200);
+
+  const handleResize = (e: any, direction: 'left' | 'right') => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = modalWidth;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const delta = direction === 'right' ? moveEvent.clientX - startX : startX - moveEvent.clientX;
+      setModalWidth(Math.max(800, Math.min(window.innerWidth * 0.95, startWidth + delta * 2)));
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
   const [products, setProducts] = useState<Product[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -71,10 +93,80 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
   const [engineVolume, setEngineVolume] = useState('');
 
   // Request Items Table
+  const generateEmptyRow = (): NewRequestItem => ({
+    id: Math.random().toString(36).substr(2, 9),
+    partNumber: '',
+    brand: '',
+    productName: '',
+    quantity: 1,
+    costPrice: '',
+    sellingPrice: '',
+    supplier: '',
+    status: 'Pending'
+  });
+
+  const getInitialItems = () => Array.from({ length: 5 }, generateEmptyRow);
+
   const [items, setItems] = useState<NewRequestItem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  
   const dropdownRef = useRef<HTMLDivElement>(null);
+  
+  const [isPastingList, setIsPastingList] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  
+  const handleParseList = () => {
+    const lines = pasteText.split('\n');
+    const newItems = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (trimmed.endsWith(':')) continue;
+      
+      let qty = 1;
+      let partNumber = '';
+      let name = trimmed;
+      
+      const qtyMatch = name.match(/(\d+)\s*шт\.?/i);
+      if (qtyMatch) {
+        qty = parseInt(qtyMatch[1], 10);
+        name = name.replace(qtyMatch[0], '').trim();
+      }
+      
+      const words = name.split(/\s+/);
+      const partMatch = words.find(w => /^[A-Za-z0-9]+-[A-Za-z0-9]+-[A-Za-z0-9]+$/.test(w) || (/^[A-Za-z0-9]{8,}$/.test(w) && /\d/.test(w)));
+      
+      if (partMatch) {
+        partNumber = partMatch;
+        name = name.replace(partMatch, '').trim();
+      }
+      
+      name = name.replace(/^[-.,]+|[-.,]+$/g, '').trim();
+      
+      newItems.push({
+        id: Date.now().toString() + Math.random().toString(),
+        partNumber: partNumber.toUpperCase(),
+        brand: '',
+        productName: name || 'Запчастина',
+        quantity: qty,
+        costPrice: '',
+        sellingPrice: '',
+        supplier: '',
+        status: 'Pending'
+      });
+    }
+    
+    if (newItems.length > 0) {
+      const filteredItems = items.filter(i => i.partNumber || i.productName);
+      setItems([...filteredItems, ...newItems]);
+    }
+    
+    setIsPastingList(false);
+    setPasteText('');
+  };
+
 
   useEffect(() => {
     const unsubscribeProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
@@ -129,23 +221,23 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
     setShowCarSelector(false);
   };
 
+  useEffect(() => {
+    if (isOpen) {
+      if (items.length === 0) {
+        setItems(getInitialItems());
+      }
+    } else {
+      resetForm();
+    }
+  }, [isOpen]);
+
   const totalAmount = items.reduce((acc, item) => {
-    const price = item.sellingPrice === '' ? 0 : Number(item.sellingPrice);
-    return acc + (price * item.quantity);
+    const price = item.sellingPrice === '' ? 0 : Number(String(item.sellingPrice).replace(',', '.'));
+    return acc + (price * Number(String(item.quantity).replace(',', '.')));
   }, 0);
 
   const addNewRow = () => {
-    setItems(prev => [...prev, {
-      id: Math.random().toString(36).substr(2, 9),
-      partNumber: '',
-      brand: '',
-      productName: '',
-      quantity: 1,
-      costPrice: '',
-      sellingPrice: '',
-      supplier: '',
-      status: 'Pending'
-    }]);
+    setItems(prev => [...prev, generateEmptyRow()]);
   };
 
   const updateItem = (id: string, field: keyof NewRequestItem, value: any) => {
@@ -160,7 +252,7 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
     setItems(prev => {
       const existing = prev.find(i => i.productId === product.id);
       if (existing) {
-        return prev.map(i => i.id === existing.id ? { ...i, quantity: i.quantity + 1 } : i);
+        return prev.map(i => i.id === existing.id ? { ...i, quantity: Number(String(i.quantity).replace(',', '.')) + 1 } : i);
       }
 
       return [...prev, {
@@ -180,7 +272,8 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (items.length === 0 || !customerName || !auth.currentUser) return;
+    const validItems = items.filter(i => i.partNumber.trim() || i.productName.trim() || i.brand.trim() || (i.sellingPrice !== '' && Number(String(i.sellingPrice).replace(',', '.')) > 0));
+    if (validItems.length === 0 || !customerName || !auth.currentUser) return;
     setIsSubmitting(true);
 
     try {
@@ -219,10 +312,10 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
         }
       }
 
-      const totalProfit = items.reduce((acc, i) => {
-        const sp = i.sellingPrice === '' ? 0 : Number(i.sellingPrice);
-        const cp = i.costPrice === '' ? 0 : Number(i.costPrice);
-        return acc + (sp - cp) * i.quantity;
+      const totalProfit = validItems.reduce((acc, i) => {
+        const sp = i.sellingPrice === '' ? 0 : Number(String(i.sellingPrice).replace(',', '.'));
+        const cp = i.costPrice === '' ? 0 : Number(String(i.costPrice).replace(',', '.'));
+        return acc + (sp - cp) * Number(String(i.quantity).replace(',', '.'));
       }, 0);
 
       await runTransaction(db, async (transaction) => {
@@ -236,23 +329,26 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
           carYear,
           engineVolume,
           status: 'Request',
-          totalAmount,
+          totalAmount: validItems.reduce((acc, item) => {
+            const price = item.sellingPrice === '' ? 0 : Number(String(item.sellingPrice).replace(',', '.'));
+            return acc + (price * Number(String(item.quantity).replace(',', '.')));
+          }, 0),
           totalProfit,
           creatorId: auth.currentUser?.uid,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
 
-        for (const item of items) {
+        for (const item of validItems) {
           const itemRef = doc(collection(db, `requests/${requestRef.id}/items`));
           transaction.set(itemRef, {
             productId: item.productId || null,
             partNumber: item.partNumber,
             brand: item.brand,
             productName: item.productName,
-            quantity: item.quantity,
-            costPrice: Number(item.costPrice),
-            sellingPrice: Number(item.sellingPrice),
+            quantity: Number(String(item.quantity).replace(',', '.')),
+            costPrice: Number(String(item.costPrice).replace(',', '.')),
+            sellingPrice: Number(String(item.sellingPrice).replace(',', '.')),
             supplier: item.supplier || '',
             deliveryTime: item.deliveryTime || '',
             status: item.status
@@ -286,7 +382,7 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
     setVin('');
     setCarYear('');
     setEngineVolume('');
-    setItems([]);
+    setItems(getInitialItems());
   };
 
   return (
@@ -305,8 +401,19 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
             initial={{ scale: 0.95, opacity: 0, y: 20 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.95, opacity: 0, y: 20 }}
-            className="relative bg-white w-full max-w-6xl h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden"
+            style={{ maxWidth: `${modalWidth}px` }}
+            className="relative bg-white w-full h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden"
           >
+            
+            {/* Resize Handles */}
+            <div 
+              className="absolute top-0 left-0 w-3 h-full cursor-col-resize z-50 hover:bg-emerald-500/20 transition-colors"
+              onMouseDown={(e) => handleResize(e, 'left')}
+            />
+            <div 
+              className="absolute top-0 right-0 w-3 h-full cursor-col-resize z-50 hover:bg-emerald-500/20 transition-colors"
+              onMouseDown={(e) => handleResize(e, 'right')}
+            />
             {/* Header */}
             <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-emerald-50 shrink-0">
               <div className="flex items-center gap-3">
@@ -495,31 +602,70 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
                       <Tag className="w-4 h-4" />
                       Специфікація запиту
                     </h4>
-                    <button type="button" onClick={addNewRow} className="flex items-center gap-2 text-emerald-600 text-sm font-bold hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors">
-                      <Plus className="w-4 h-4" />
-                      Додати рядок
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => setIsPastingList(!isPastingList)} className={cn("flex items-center gap-2 text-sm font-bold px-3 py-1.5 rounded-lg transition-colors", isPastingList ? "bg-blue-50 text-blue-700" : "text-blue-600 hover:bg-blue-50")}>
+                        <ClipboardList className="w-4 h-4" />
+                        {isPastingList ? 'Сховати' : 'Вставити список'}
+                      </button>
+                      <button type="button" onClick={addNewRow} className="flex items-center gap-2 text-emerald-600 text-sm font-bold hover:bg-emerald-50 px-3 py-1.5 rounded-lg transition-colors">
+                        <Plus className="w-4 h-4" />
+                        Додати рядок
+                      </button>
+                    </div>
                   </div>
+                  
+                  <AnimatePresence>
+                    {isPastingList && (
+                      <motion.div 
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="p-6 bg-blue-50/50 border-b border-slate-100 space-y-3">
+                          <label className="text-xs font-bold text-blue-800 uppercase tracking-widest flex items-center gap-2">
+                            Швидке додавання текстом
+                            <span className="text-[10px] font-medium normal-case opacity-70 bg-blue-100 px-2 py-0.5 rounded-full">З Viber або Telegram</span>
+                          </label>
+                          <textarea
+                            value={pasteText}
+                            onChange={(e) => setPasteText(e.target.value)}
+                            placeholder="Вставте список запчастин (напр: 12290rwca01 4шт)"
+                            className="w-full h-32 p-4 bg-white border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm resize-y"
+                          />
+                          <div className="flex justify-end">
+                            <button type="button" onClick={handleParseList} disabled={!pasteText.trim()} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-500/20 hover:bg-blue-700 transition-all disabled:opacity-50 flex items-center gap-2">
+                              <ClipboardList className="w-4 h-4" />
+                              Обробити список
+                            </button>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                   
                   <div className="overflow-x-auto">
                     <table className="w-full text-left">
                       <thead className="bg-slate-50">
                         <tr>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Артикул</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Бренд</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Назва</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">К-ть</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Вхід (₴)</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Продаж (₴)</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Срок</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Постачальник</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter">Статус</th>
-                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter"></th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-full min-w-[200px]">Назва</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-48">Артикул</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-32">Бренд</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-16">К-ть</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-24">Вхід (₴)</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-24">Продаж (₴)</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-16">Срок</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-32">Постачальник</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-28">Статус</th>
+                          <th className="px-6 py-3 text-[10px] font-black text-slate-400 uppercase tracking-tighter w-10"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {items.map((item, index) => (
                           <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                            <td className="px-3 py-2">
+                              <input value={item.productName} onChange={e => updateItem(item.id, 'productName', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs" placeholder="Назва запчастини" />
+                            </td>
                             <td className="px-3 py-2">
                               <input value={item.partNumber} onChange={e => updateItem(item.id, 'partNumber', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs font-mono uppercase" placeholder="SKU" />
                             </td>
@@ -527,19 +673,16 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
                               <input value={item.brand} onChange={e => updateItem(item.id, 'brand', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs" placeholder="Виробник" />
                             </td>
                             <td className="px-3 py-2">
-                              <input value={item.productName} onChange={e => updateItem(item.id, 'productName', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs" placeholder="Назва запчастини" />
-                            </td>
-                            <td className="px-3 py-2 w-16">
-                              <input type="number" value={item.quantity} onChange={e => updateItem(item.id, 'quantity', parseInt(e.target.value) || 1)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs text-center" />
-                            </td>
-                            <td className="px-3 py-2 w-24">
-                              <input type="number" value={item.costPrice === 0 ? '' : item.costPrice} onChange={e => updateItem(item.id, 'costPrice', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs" />
-                            </td>
-                            <td className="px-3 py-2 w-24">
-                              <input type="number" value={item.sellingPrice === 0 ? '' : item.sellingPrice} onChange={e => updateItem(item.id, 'sellingPrice', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs font-bold text-slate-900" />
+                              <input type="text" value={Number(String(item.quantity).replace(',', '.'))} onChange={e => updateItem(item.id, 'quantity', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                             </td>
                             <td className="px-3 py-2">
-                              <input value={item.deliveryTime || ''} onChange={e => updateItem(item.id, 'deliveryTime', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs font-bold text-blue-600 uppercase" placeholder="Срок" />
+                              <input type="text" value={item.costPrice === 0 ? "" : item.costPrice} onChange={e => updateItem(item.id, 'costPrice', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input type="text" value={item.sellingPrice === 0 ? "" : item.sellingPrice} onChange={e => updateItem(item.id, 'sellingPrice', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs font-bold text-slate-900 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                            </td>
+                            <td className="px-3 py-2">
+                              <input value={item.deliveryTime || ''} onChange={e => updateItem(item.id, 'deliveryTime', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs font-bold text-blue-600 uppercase text-center" placeholder="Срок" maxLength={2} />
                             </td>
                             <td className="px-3 py-2">
                               <input value={item.supplier} onChange={e => updateItem(item.id, 'supplier', e.target.value)} className="w-full px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg outline-none focus:border-emerald-500 text-xs" placeholder="Постачальник" />
@@ -552,20 +695,22 @@ export default function CreateRequestModal({ isOpen, onClose }: CreateRequestMod
                                   "w-full px-2 py-1.5 rounded-lg outline-none border text-[10px] font-black uppercase tracking-tighter transition-all cursor-pointer",
                                   item.status === 'Pending' ? "bg-amber-50 text-amber-600 border-amber-100" :
                                   item.status === 'Ordered' ? "bg-purple-50 text-purple-600 border-purple-100" :
+                                  item.status === 'In Transit' ? "bg-orange-50 text-orange-600 border-orange-100" :
                                   item.status === 'Available' ? "bg-blue-50 text-blue-600 border-blue-100" :
                                   item.status === 'Out of Stock' ? "bg-rose-50 text-rose-600 border-rose-100" :
                                   item.status === 'Picked' ? "bg-emerald-50 text-emerald-600 border-emerald-100" :
-                                  item.status === 'Packed' ? "bg-indigo-50 text-indigo-600 border-indigo-100" :
+                                  item.status === 'Confirmed' ? "bg-indigo-50 text-indigo-600 border-indigo-100" :
                                   item.status === 'Issued' ? "bg-slate-900 text-white border-slate-900" :
                                   "bg-slate-50 text-slate-500 border-slate-200"
                                 )}
                               >
                                 <option value="Pending">Очікує</option>
                                 <option value="Ordered">Замовлено</option>
+                                <option value="In Transit">В дорозі</option>
                                 <option value="Available">В наявності</option>
                                 <option value="Out of Stock">Немає</option>
                                 <option value="Picked">Зібрано</option>
-                                <option value="Packed">Запаковано</option>
+                                <option value="Confirmed">Підтверджено клієнтом</option>
                                 <option value="Issued">Видано</option>
                               </select>
                             </td>
