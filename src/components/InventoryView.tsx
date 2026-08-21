@@ -1,5 +1,5 @@
 import { useEffect, useState, FormEvent, useRef, ChangeEvent } from 'react';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db, handleFirestoreError, OperationType, logAdminAction } from '../firebase';
 import { 
   collection, 
   onSnapshot, 
@@ -37,6 +37,7 @@ export default function InventoryView() {
   const [supplierFilter, setSupplierFilter] = useState('All');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState({
@@ -100,10 +101,10 @@ export default function InventoryView() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Ви впевнені, що хочете видалити цей товар?')) return;
     const path = 'products';
     try {
       await deleteDoc(doc(db, path, id));
+      logAdminAction('DELETE_PRODUCT', `Deleted product with ID ${id}`, { productId: id });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, path);
     }
@@ -331,12 +332,29 @@ export default function InventoryView() {
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button 
-                        onClick={() => handleDelete(product.id)}
-                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {confirmDeleteId === product.id ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => { handleDelete(product.id); setConfirmDeleteId(null); }}
+                            className="text-[10px] font-black uppercase tracking-wider bg-rose-50 text-rose-600 px-2 py-1 rounded border border-rose-200 hover:bg-rose-100"
+                          >
+                            Видалити
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="text-[10px] font-black uppercase tracking-wider bg-slate-50 text-slate-600 px-2 py-1 rounded border border-slate-200 hover:bg-slate-100"
+                          >
+                            Відміна
+                          </button>
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={() => setConfirmDeleteId(product.id)}
+                          className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

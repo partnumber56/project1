@@ -53,9 +53,10 @@ import RequestsView from './components/RequestsView';
 import OrderManagementView from './components/OrderManagementView';
 import ClientsView from './components/ClientsView';
 import FinanceView from './components/FinanceView';
+import SystemLogView from './components/SystemLogView';
 import UserManagementView from './components/UserManagementView';
 
-type View = 'dashboard' | 'inventory' | 'orders' | 'reports' | 'requests' | 'items' | 'finance' | 'users' | 'clients';
+type View = 'dashboard' | 'inventory' | 'orders' | 'reports' | 'requests' | 'items' | 'finance' | 'users' | 'clients' | 'logs';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -220,7 +221,7 @@ export default function App() {
       <motion.aside
         initial={false}
         animate={{ width: isSidebarOpen ? 280 : 80 }}
-        className="bg-slate-900 text-white flex flex-col fixed h-full z-30 transition-all"
+        className="bg-slate-900 text-white flex flex-col fixed h-full z-30 transition-all print:hidden"
       >
         <div className="p-6 flex items-center gap-3 overflow-hidden whitespace-nowrap border-b border-slate-800">
           <div className="p-2 bg-blue-600 rounded-lg shrink-0">
@@ -313,11 +314,11 @@ export default function App() {
 
       {/* Main Content */}
       <main className={cn(
-        "flex-1 flex flex-col transition-all duration-300",
+        "flex-1 flex flex-col transition-all duration-300 print:ml-0 print:w-full",
         isSidebarOpen ? "ml-[280px]" : "ml-[80px]"
       )}>
         {/* Header */}
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 sticky top-0 z-20">
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 sticky top-0 z-20 print:hidden">
           <div className="flex items-center gap-4">
             <h2 className="text-xl font-semibold text-slate-800 capitalize">
               {activeView === 'dashboard' ? 'Загальний огляд' : 
@@ -326,7 +327,8 @@ export default function App() {
                activeView === 'items' ? 'Всі позиції замовлень' :
                activeView === 'finance' ? 'Фінансово-клієнтський облік' :
                activeView === 'inventory' ? 'Товарні запаси' : 
-               activeView === 'users' ? 'Керування доступом' : 'Звітність'}
+               activeView === 'users' ? 'Керування доступом' : 
+               activeView === 'logs' ? 'Системний Журнал' : 'Звітність'}
             </h2>
           </div>
 
@@ -408,12 +410,13 @@ export default function App() {
               {activeView === 'dashboard' && userRole === 'admin' && <DashboardView />}
               {activeView === 'requests' && <RequestsView />}
               {activeView === 'inventory' && <InventoryView />}
-              {activeView === 'orders' && <OrdersView />}
+              {activeView === 'orders' && <OrdersView userRole={userRole} />}
               {activeView === 'items' && <OrderManagementView />}
               {activeView === 'clients' && <ClientsView />}
-              {activeView === 'finance' && <FinanceView />}
+              {activeView === 'finance' && <FinanceView userRole={userRole} />}
               {activeView === 'reports' && userRole === 'admin' && <ReportsView />}
               {activeView === 'users' && userRole === 'admin' && <UserManagementView currentUserEmail={user.email || ''} />}
+              {activeView === 'logs' && userRole === 'admin' && <SystemLogView />}
             </motion.div>
           </AnimatePresence>
         </div>

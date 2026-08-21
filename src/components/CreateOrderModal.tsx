@@ -331,16 +331,7 @@ export default function CreateOrderModal({ isOpen, onClose }: CreateOrderModalPr
             status: item.status
           });
 
-          // Update stock if we have a productId
-          if (item.productId) {
-            const productRef = doc(db, 'products', item.productId);
-            const productSnap = await transaction.get(productRef);
-            if (productSnap.exists()) {
-              const currentStock = productSnap.data().stock || 0;
-              const newStock = Math.max(0, currentStock - Number(String(item.quantity).replace(',', '.')));
-              transaction.update(productRef, { stock: newStock });
-            }
-          }
+
         }
 
         // 3. Create notification

@@ -36,7 +36,7 @@ import { cn, formatCurrency, exportToCSV } from '../lib/utils';
 import CreateOrderModal from './CreateOrderModal';
 import OrderDetailsModal from './OrderDetailsModal';
 
-export default function OrdersView() {
+export default function OrdersView({ userRole }: { userRole?: string | null }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'All'>('All');
@@ -109,7 +109,7 @@ export default function OrdersView() {
   return (
     <div className="space-y-6">
       {/* Search & Filter */}
-      <div className="flex flex-col lg:flex-row gap-4 justify-between items-start lg:items-center">
+      <div className="flex flex-col lg:flex-row gap-4 justify-between items-start lg:items-center print:hidden">
         <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
           <div className="relative flex-1 sm:w-64 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -157,7 +157,7 @@ export default function OrdersView() {
       </div>
 
       {/* Orders Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 print:hidden">
         <AnimatePresence mode="popLayout">
           {filteredOrders.map(order => (
             <motion.div
@@ -215,7 +215,7 @@ export default function OrdersView() {
         </AnimatePresence>
 
         {filteredOrders.length === 0 && (
-          <div className="col-span-full py-24 flex flex-col items-center justify-center text-slate-400">
+          <div className="col-span-full py-24 flex flex-col items-center justify-center text-slate-400 print:hidden">
             <ShoppingCart className="w-16 h-16 mb-4 opacity-20" />
             <p className="font-medium">Замовлень за вашим запитом не знайдено</p>
           </div>
@@ -229,7 +229,8 @@ export default function OrdersView() {
 
       <OrderDetailsModal 
         order={selectedOrder} 
-        onClose={() => setSelectedOrder(null)} 
+        onClose={() => setSelectedOrder(null)}
+        userRole={userRole}
       />
     </div>
   );

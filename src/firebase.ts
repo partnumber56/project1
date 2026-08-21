@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDocFromCache, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromCache, getDocFromServer, collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
@@ -59,4 +59,20 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
+}
+
+export async function logAdminAction(actionType: string, description: string, details?: any) {
+  if (!auth.currentUser) return;
+  try {
+    await addDoc(collection(db, 'systemLogs'), {
+      adminId: auth.currentUser.uid,
+      adminEmail: auth.currentUser.email,
+      actionType,
+      description,
+      details: details || {},
+      timestamp: serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Failed to write admin log:', error);
+  }
 }

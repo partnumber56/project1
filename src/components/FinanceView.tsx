@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db, handleFirestoreError, OperationType, logAdminAction } from '../firebase';
 import { 
   collection, 
   onSnapshot, 
@@ -22,13 +22,14 @@ import {
   TrendingUp,
   AlertCircle,
   XCircle,
-  Phone
+  Phone,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Client, FinancialTransaction } from '../types';
 import { cn, formatCurrency } from '../lib/utils';
 
-export default function FinanceView() {
+export default function FinanceView({ userRole }: { userRole?: string | null }) {
   const [clients, setClients] = useState<Client[]>([]);
   const [transactions, setTransactions] = useState<FinancialTransaction[]>([]);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -41,6 +42,7 @@ export default function FinanceView() {
   const [txType, setTxType] = useState<'Payment' | 'Refund' | 'Adjustment'>('Payment');
   const [txAmount, setTxAmount] = useState<string>('');
   const [txDesc, setTxDesc] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'clients'), (snapshot) => {
@@ -74,6 +76,30 @@ export default function FinanceView() {
     const searchTermLower = searchTerm.toLowerCase();
     return name.includes(searchTermLower) || phone.includes(searchTermLower);
   }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  const handleDeleteTransaction = async (tx: FinancialTransaction) => {
+    if (userRole !== 'admin') return;
+
+    try {
+      let clientName = tx.clientId;
+      await runTransaction(db, async (transaction) => {
+        const clientRef = doc(db, 'clients', tx.clientId);
+        const txRef = doc(db, `clients/${tx.clientId}/transactions`, tx.id);
+        
+        const clientSnap = await transaction.get(clientRef);
+        if (clientSnap.exists()) {
+          const clientData = clientSnap.data();
+          clientName = clientData.name || tx.clientId;
+          const newBalance = (clientData.balance || 0) - tx.amount;
+          transaction.update(clientRef, { balance: newBalance });
+        }
+        transaction.delete(txRef);
+      });
+      logAdminAction('DELETE_TRANSACTION', `Deleted transaction ${tx.id} for client ${clientName}`, tx);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'transactions');
+    }
+  };
 
   const handleAddTransaction = async () => {
     if (!selectedClient || !txAmount || isNaN(parseFloat(txAmount))) return;
@@ -265,6 +291,7 @@ export default function FinanceView() {
                       <th className="px-4 py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">Дата</th>
                       <th className="px-4 py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">Тип / Опис</th>
                       <th className="px-4 py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Сума</th>
+                      {userRole === 'admin' && <th className="px-4 py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Дія</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -291,11 +318,39 @@ export default function FinanceView() {
                         )}>
                           {tx.amount >= 0 ? '+' : ''}{formatCurrency(tx.amount)}
                         </td>
+                        {userRole === 'admin' && (
+                          <td className="px-4 py-4 text-right">
+                            {confirmDeleteId === tx.id ? (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => handleDeleteTransaction(tx)}
+                                  className="text-[10px] font-black uppercase tracking-wider bg-rose-50 text-rose-600 px-2 py-1 rounded border border-rose-200 hover:bg-rose-100"
+                                >
+                                  Підтвердити
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDeleteId(null)}
+                                  className="text-[10px] font-black uppercase tracking-wider bg-slate-50 text-slate-600 px-2 py-1 rounded border border-slate-200 hover:bg-slate-100"
+                                >
+                                  Скасувати
+                                </button>
+                              </div>
+                            ) : (
+                              <button 
+                                onClick={() => setConfirmDeleteId(tx.id)}
+                                className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors"
+                                title="Видалити транзакцію"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     ))}
                     {transactions.length === 0 && (
                       <tr>
-                        <td colSpan={3} className="py-24 text-center text-slate-400 italic font-medium">
+                        <td colSpan={userRole === 'admin' ? 4 : 3} className="py-24 text-center text-slate-400 italic font-medium">
                           Транзакцій поки немає
                         </td>
                       </tr>

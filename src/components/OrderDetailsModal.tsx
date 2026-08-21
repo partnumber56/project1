@@ -39,6 +39,7 @@ import { cn, formatCurrency } from '../lib/utils';
 interface OrderDetailsModalProps {
   order: Order | null;
   onClose: () => void;
+  userRole?: string | null;
 }
 
 interface EditableInputProps {
@@ -75,7 +76,7 @@ function EditableInput({ value, onSave, type = 'text', placeholder, className }:
   );
 }
 
-export default function OrderDetailsModal({ order, onClose }: OrderDetailsModalProps) {
+export default function OrderDetailsModal({ order, onClose, userRole }: OrderDetailsModalProps) {
 
   const [modalWidth, setModalWidth] = useState(1200);
 
@@ -100,6 +101,7 @@ export default function OrderDetailsModal({ order, onClose }: OrderDetailsModalP
 
   const [items, setItems] = useState<OrderItem[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [showClientSuggestions, setShowClientSuggestions] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -183,6 +185,21 @@ ${itemsText}
           updatedAt: serverTimestamp()
         };
 
+        // Handle Inventory Deduction
+        if (newStatus === 'Delivered' && currentOrder.status !== 'Delivered') {
+          for (const item of items) {
+            if (item.productId) {
+              const productRef = doc(db, 'products', item.productId);
+              const productSnap = await transaction.get(productRef);
+              if (productSnap.exists()) {
+                const currentStock = productSnap.data().stock || 0;
+                const newStock = Math.max(0, currentStock - Number(String(item.quantity).replace(',', '.')));
+                transaction.update(productRef, { stock: newStock });
+              }
+            }
+          }
+        }
+
         // Handle Financial logic when Delivered
         if (newStatus === 'Delivered' && !currentOrder.isFinancialProcessed) {
           if (currentOrder.clientId) {
@@ -238,6 +255,7 @@ ${itemsText}
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, 'orders');
     } finally {
+      logAdminAction('STATUS_UPDATE', `Updated order ${order.id} status to ${newStatus}`, { orderId: order.id, status: newStatus });
       setIsUpdating(false);
     }
   };
@@ -363,8 +381,32 @@ ${itemsText}
     }
   };
 
-  const handlePrint = () => {
-    window.print();
+  const handlePrint = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setTimeout(() => {
+      window.print();
+    }, 100);
+  };
+
+  const handleDeleteOrder = async () => {
+    if (!order || userRole !== 'admin') return;
+
+    try {
+      setIsUpdating(true);
+      // Delete all items first
+      const itemsSnapshot = await getDocs(collection(db, `orders/${order.id}/items`));
+      const deleteItemPromises = itemsSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deleteItemPromises);
+      
+      // Delete the order itself
+      await deleteDoc(doc(db, 'orders', order.id));
+      
+      onClose();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'orders');
+      setIsUpdating(false);
+    }
   };
 
   const createNewClient = async () => {
@@ -394,7 +436,7 @@ ${itemsText}
   if (!order) return null;
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:static print:block print:p-0 print:bg-white print:overflow-visible print:h-auto print:w-full">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 print:static print:p-0 print:block">
         <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -407,7 +449,7 @@ ${itemsText}
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.95, opacity: 0, y: 20 }}
           style={{ maxWidth: `${modalWidth}px` }}
-            className="relative bg-white w-full h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden print:hidden"
+            className="relative bg-white w-full h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden print:block print:h-auto print:shadow-none print:overflow-visible"
         >
           
             {/* Resize Handles */}
@@ -420,7 +462,7 @@ ${itemsText}
               onMouseDown={(e) => handleResize(e, 'right')}
             />
             {/* Header */}
-          <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0 no-print">
+          <div className="p-8 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0 print:hidden">
             <div className="flex items-center gap-6">
               <div>
                 <div className="flex items-center gap-3 mb-2">
@@ -451,13 +493,42 @@ ${itemsText}
                 {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
                 {copied ? 'Скопійовано!' : 'Копіювати для Gemini'}
               </button>
+
+              {userRole === 'admin' && (
+                isConfirmingDelete ? (
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={handleDeleteOrder}
+                      className="flex items-center gap-2 px-6 py-3 bg-rose-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-rose-700 transition-all shadow-sm active:scale-95"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Підтвердити
+                    </button>
+                    <button 
+                      onClick={() => setIsConfirmingDelete(false)}
+                      className="px-6 py-3 bg-white border-2 border-slate-200 text-slate-600 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-50 transition-all shadow-sm active:scale-95"
+                    >
+                      Скасувати
+                    </button>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={() => setIsConfirmingDelete(true)}
+                    className="flex items-center gap-2 px-6 py-3 bg-white border-2 border-rose-200 text-rose-600 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:border-rose-600 hover:bg-rose-50 transition-all shadow-sm active:scale-95"
+                    title="Видалити замовлення"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Видалити
+                  </button>
+                )
+              )}
             </div>
             <button onClick={onClose} className="p-3 hover:bg-slate-200 rounded-full transition-colors text-slate-400 self-start">
               <X className="w-6 h-6" />
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-8 bg-slate-50/30">
+          <div className="flex-1 overflow-y-auto p-8 bg-slate-50/30 print:hidden">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               {/* Main Content (Items Table) */}
               <div className="lg:col-span-2 space-y-6">
@@ -594,41 +665,28 @@ ${itemsText}
                   </div>
                 </div>
 
-                {/* Status Timeline / Transitions */}
+                {/* Issue Goods Button */}
                 <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
-                  <h4 className="font-bold text-slate-800 mb-6">Змінити статус замовлення</h4>
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                    <StatusButton 
-                      status="Pending" 
-                      current={order.status} 
-                      onClick={() => updateOrderStatus('Pending')} 
-                      icon={<Clock className="w-4 h-4" />}
-                    />
-                    <StatusButton 
-                      status="Processing" 
-                      current={order.status} 
-                      onClick={() => updateOrderStatus('Processing')} 
-                      icon={<Package className="w-4 h-4" />}
-                    />
-                    <StatusButton 
-                      status="Shipped" 
-                      current={order.status} 
-                      onClick={() => updateOrderStatus('Shipped')} 
-                      icon={<Truck className="w-4 h-4" />}
-                    />
-                    <StatusButton 
-                      status="Delivered" 
-                      current={order.status} 
-                      onClick={() => updateOrderStatus('Delivered')} 
-                      icon={<CheckCircle2 className="w-4 h-4" />}
-                    />
-                    <StatusButton 
-                      status="Cancelled" 
-                      current={order.status} 
-                      onClick={() => updateOrderStatus('Cancelled')} 
-                      icon={<XCircle className="w-4 h-4" />}
-                      isDangerous
-                    />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-slate-800 mb-1">Видача товару</h4>
+                      <p className="text-sm text-slate-500">Списання товару зі складу та фіксація оплати</p>
+                    </div>
+                    {order.status !== 'Delivered' ? (
+                      <button
+                        onClick={() => updateOrderStatus('Delivered')}
+                        disabled={isUpdating}
+                        className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                      >
+                        <Package className="w-5 h-5" />
+                        {isUpdating ? 'Обробка...' : 'Видати товар'}
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2 px-6 py-3 bg-emerald-50 text-emerald-700 rounded-xl font-bold border border-emerald-200">
+                        <CheckCircle2 className="w-5 h-5" />
+                        Товар видано
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -780,86 +838,52 @@ ${itemsText}
         </motion.div>
 
         {/* Hidden Print Content */}
-        <div id="print-area" className="hidden print:block p-10 bg-white min-h-screen text-slate-900 print:absolute print:inset-0 print:w-full print:h-auto print:overflow-visible">
+        <div id="print-area" className="hidden print:block p-10 bg-white min-h-screen text-slate-900">
           {/* Invoice Header */}
-          <div className="flex justify-between items-start mb-12 border-b-4 border-slate-900 pb-10">
-            <div>
-              <h1 className="text-4xl font-black uppercase tracking-tighter mb-2">Накладна # {order.id.substring(0, 8).toUpperCase()}</h1>
-              <p className="text-slate-500 font-bold flex items-center gap-2">
-                Дата: {new Date().toLocaleDateString('uk-UA')}
-              </p>
-            </div>
-            <div className="text-right">
-              <h2 className="text-2xl font-black uppercase tracking-tight text-blue-600">Система PartNumber</h2>
-              <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest mt-1">Автоматизований облік СТО</p>
-            </div>
-          </div>
-
-          {/* Client & Car Grid */}
-          <div className="grid grid-cols-2 gap-16 mb-12">
-            <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
-              <h3 className="text-[11px] font-black uppercase text-slate-400 mb-4 tracking-widest flex items-center gap-2">
-                <User className="w-3 h-3" /> Отримувач
-              </h3>
-              <p className="text-xl font-black text-slate-900 mb-1">{order.customerName}</p>
-              <p className="font-bold text-slate-600">{order.customerPhone || 'Не вказано'}</p>
-            </div>
-            <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 text-right">
-              <h3 className="text-[11px] font-black uppercase text-slate-400 mb-4 tracking-widest flex items-center gap-2 justify-end">
-                <Car className="w-3 h-3" /> Автомобіль
-              </h3>
-              <p className="text-lg font-black text-slate-900 mb-1">
-                {order.carModel || '-'} {order.carYear ? `(${order.carYear})` : ''}
-              </p>
-              <p className="font-mono text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">{order.vin || 'VIN не вказано'}</p>
-              <p className="text-[10px] uppercase font-black text-slate-400">{order.engineVolume ? `Двигун: ${order.engineVolume}` : ''}</p>
-            </div>
+          <div className="mb-6 pb-4 border-b-2 border-slate-900">
+            <h1 className="text-2xl font-black uppercase tracking-tighter mb-2">Накладна від {new Date().toLocaleDateString('uk-UA')}</h1>
+            <p className="text-sm font-medium text-slate-600">
+              <span className="font-bold text-slate-900">Клієнт:</span> {order.customerName} {order.customerPhone ? `, ${order.customerPhone}` : ''}
+            </p>
           </div>
 
           {/* Table */}
-          <table className="w-full mb-12 text-left border-collapse">
+          <table className="w-full mb-6 text-left border-collapse">
             <thead>
               <tr className="border-b-2 border-slate-900 border-t-2">
-                <th className="py-5 px-4 text-xs font-black uppercase tracking-widest text-slate-500">Назва</th>
-                <th className="py-5 px-4 text-xs font-black uppercase tracking-widest text-slate-500">Бренд</th>
-                <th className="py-5 px-4 text-xs font-black uppercase tracking-widest text-slate-500 text-right">Ціна продажу (₴)</th>
-                <th className="py-5 px-4 text-xs font-black uppercase tracking-widest text-slate-500 text-center">Кількість</th>
+                <th className="py-2 px-2 text-[10px] font-black uppercase tracking-widest text-slate-500">Назва</th>
+                <th className="py-2 px-2 text-[10px] font-black uppercase tracking-widest text-slate-500">Бренд</th>
+                <th className="py-2 px-2 text-[10px] font-black uppercase tracking-widest text-slate-500 text-right">Ціна продажу (₴)</th>
+                <th className="py-2 px-2 text-[10px] font-black uppercase tracking-widest text-slate-500 text-center">Кількість</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {items.map((item, index) => (
                 <tr key={item.id} className="page-break-inside-avoid">
-                  <td className="py-6 px-4 font-bold text-slate-900 text-sm">{item.productName || 'Запчастина'}</td>
-                  <td className="py-6 px-4 font-bold text-slate-900 text-sm">{item.brand || '-'}</td>
-                  <td className="py-6 px-4 text-right font-bold text-sm text-slate-900">{formatCurrency(item.sellingPrice)}</td>
-                  <td className="py-6 px-4 text-center font-black text-sm text-slate-900">{item.quantity}</td>
+                  <td className="py-2 px-2 font-bold text-slate-900 text-xs">{item.productName || 'Запчастина'}</td>
+                  <td className="py-2 px-2 font-bold text-slate-900 text-xs">{item.brand || '-'}</td>
+                  <td className="py-2 px-2 text-right font-bold text-xs text-slate-900">{formatCurrency(item.sellingPrice)}</td>
+                  <td className="py-2 px-2 text-center font-black text-xs text-slate-900">{item.quantity}</td>
                 </tr>
               ))}
             </tbody>
           </table>
 
           {/* Totals */}
-          <div className="flex justify-end pt-10 border-t-2 border-slate-900">
+          <div className="flex justify-end pt-4 border-t-2 border-slate-900">
             <div className="w-80 space-y-4">
               <div className="flex justify-between items-center text-slate-400">
                 <span className="text-xs font-black uppercase">Кількість позицій:</span>
                 <span className="font-bold">{items.length}</span>
               </div>
-              <div className="flex justify-between items-center bg-slate-900 p-6 rounded-2xl text-white shadow-xl">
+              <div className="flex justify-between items-center bg-slate-900 p-4 rounded-xl text-white shadow-md">
                 <span className="text-xs font-black uppercase tracking-widest">Разом до сплати:</span>
                 <span className="text-3xl font-black">{formatCurrency(calculatedTotal)}</span>
               </div>
             </div>
           </div>
 
-          {/* Bottom Footer */}
-          <div className="mt-32 pt-16 border-t font-medium border-slate-100 italic text-xs text-slate-400 text-center flex flex-col gap-4">
-            <div className="flex justify-around mb-12 italic text-sm text-slate-900">
-              <div className="border-b border-slate-900 w-48 text-center pb-2 uppercase tracking-tighter font-black">Підпис продавця</div>
-              <div className="border-b border-slate-900 w-48 text-center pb-2 uppercase tracking-tighter font-black">Підпис покупця</div>
-            </div>
-            <p>Система PartNumber — професійний облік автозапчастин та сто сто. Дякуємо, що ви з нами!</p>
-          </div>
+
         </div>
       </div>
     </AnimatePresence>
