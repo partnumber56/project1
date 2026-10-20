@@ -109,9 +109,27 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "message", "read", "createdAt"]
+    },
+    "SystemLog": {
+      "title": "SystemLog",
+      "description": "Administrative action logs",
+      "type": "object",
+      "properties": {
+        "adminId": { "type": "string" },
+        "adminEmail": { "type": "string" },
+        "actionType": { "type": "string" },
+        "description": { "type": "string" },
+        "details": { "type": "object" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["adminId", "adminEmail", "actionType", "description", "timestamp"]
     }
   },
   "firestore": {
+    "/systemLogs/{logId}": {
+      "schema": "SystemLog",
+      "description": "Administrative audit and system activity logs"
+    },
     "/products/{productId}": {
       "schema": "Product",
       "description": "Inventory products"

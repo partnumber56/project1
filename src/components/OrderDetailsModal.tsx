@@ -1,5 +1,5 @@
-import { useEffect, useState, ReactNode, useRef } from 'react';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import React, { useEffect, useState, ReactNode, useRef, MouseEvent } from 'react';
+import { db, handleFirestoreError, OperationType, logAdminAction } from '../firebase';
 import { 
   collection, 
   onSnapshot, 
@@ -401,6 +401,7 @@ ${itemsText}
       
       // Delete the order itself
       await deleteDoc(doc(db, 'orders', order.id));
+      logAdminAction('DELETE_ORDER', `Deleted order ${order.id}`, { orderId: order.id, customer: order.customerName });
       
       onClose();
     } catch (error) {

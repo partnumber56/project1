@@ -2,5 +2,7 @@
   "name": "OrderFlow Pro",
   "description": "Система управління замовленнями та складом з відстеженням статусів товарів та детальною звітністю.",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

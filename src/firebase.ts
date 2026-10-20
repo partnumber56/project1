@@ -64,12 +64,20 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 export async function logAdminAction(actionType: string, description: string, details?: any) {
   if (!auth.currentUser) return;
   try {
+    let sanitizedDetails = {};
+    if (details) {
+      try {
+        sanitizedDetails = JSON.parse(JSON.stringify(details, (_, v) => v === undefined ? null : v));
+      } catch {
+        sanitizedDetails = { info: String(details) };
+      }
+    }
     await addDoc(collection(db, 'systemLogs'), {
       adminId: auth.currentUser.uid,
       adminEmail: auth.currentUser.email,
       actionType,
       description,
-      details: details || {},
+      details: sanitizedDetails,
       timestamp: serverTimestamp()
     });
   } catch (error) {

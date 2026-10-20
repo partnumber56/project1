@@ -40,7 +40,8 @@ import {
   Wallet,
   FileText,
   Users,
-  ShieldAlert
+  ShieldAlert,
+  Activity
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, formatCurrency } from './lib/utils';
@@ -101,7 +102,11 @@ export default function App() {
             const docSnap = await getDoc(userRef);
             if (docSnap.exists()) {
               const data = docSnap.data();
-              setUserRole(data.role as Role);
+              const role = data.role as Role;
+              setUserRole(role);
+              if (role !== 'admin') {
+                setActiveView(prev => prev === 'dashboard' ? 'orders' : prev);
+              }
             } else {
               setUserRole(null); // No access
             }
@@ -298,6 +303,15 @@ export default function App() {
               isActive={activeView === 'users'} 
               expanded={isSidebarOpen} 
               onClick={() => setActiveView('users')} 
+            />
+          )}
+          {userRole === 'admin' && (
+            <NavItem 
+              icon={<Activity />} 
+              label="Системний Журнал" 
+              isActive={activeView === 'logs'} 
+              expanded={isSidebarOpen} 
+              onClick={() => setActiveView('logs')} 
             />
           )}
         </nav>
