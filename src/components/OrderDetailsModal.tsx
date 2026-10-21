@@ -450,7 +450,7 @@ ${itemsText}
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.95, opacity: 0, y: 20 }}
           style={{ maxWidth: `${modalWidth}px` }}
-            className="relative bg-white w-full h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden print:block print:h-auto print:shadow-none print:overflow-visible"
+          className="relative bg-white w-full h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden print:hidden"
         >
           
             {/* Resize Handles */}
@@ -468,13 +468,28 @@ ${itemsText}
               <div>
                 <div className="flex items-center gap-3 mb-2">
                   <span className="text-xs font-mono text-slate-400 bg-white px-2 py-1 rounded border border-slate-200">#{order.id}</span>
-                  <span className={cn(
-                     "px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border",
-                     order.status === 'Delivered' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 
-                     order.status === 'Cancelled' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-blue-50 text-blue-700 border-blue-200'
-                  )}>
-                    {order.status}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={order.status}
+                      disabled={isUpdating}
+                      onChange={(e) => updateOrderStatus(e.target.value as OrderStatus)}
+                      aria-label="Змінити статус замовлення"
+                      className={cn(
+                        "px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider border outline-none cursor-pointer transition-all shadow-sm",
+                        order.status === 'Delivered' ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100' : 
+                        order.status === 'Cancelled' ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100' :
+                        order.status === 'Processing' ? 'bg-blue-50 text-blue-700 border-blue-300 hover:bg-blue-100' :
+                        order.status === 'Shipped' ? 'bg-indigo-50 text-indigo-700 border-indigo-300 hover:bg-indigo-100' :
+                        'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100'
+                      )}
+                    >
+                      <option value="Pending">Очікує</option>
+                      <option value="Processing">В обробці</option>
+                      <option value="Shipped">Відправлено</option>
+                      <option value="Delivered">Виконано</option>
+                      <option value="Cancelled">Скасовано</option>
+                    </select>
+                  </div>
                 </div>
                 <h3 className="text-2xl font-black text-slate-900">Деталі замовлення</h3>
               </div>
@@ -839,52 +854,116 @@ ${itemsText}
         </motion.div>
 
         {/* Hidden Print Content */}
-        <div id="print-area" className="hidden print:block p-10 bg-white min-h-screen text-slate-900">
+        <div id="print-area" className="hidden print:block p-8 bg-white min-h-screen text-slate-900 font-sans">
           {/* Invoice Header */}
-          <div className="mb-6 pb-4 border-b-2 border-slate-900">
-            <h1 className="text-2xl font-black uppercase tracking-tighter mb-2">Накладна від {new Date().toLocaleDateString('uk-UA')}</h1>
-            <p className="text-sm font-medium text-slate-600">
-              <span className="font-bold text-slate-900">Клієнт:</span> {order.customerName} {order.customerPhone ? `, ${order.customerPhone}` : ''}
-            </p>
-          </div>
-
-          {/* Table */}
-          <table className="w-full mb-6 text-left border-collapse">
-            <thead>
-              <tr className="border-b-2 border-slate-900 border-t-2">
-                <th className="py-2 px-2 text-[10px] font-black uppercase tracking-widest text-slate-500">Назва</th>
-                <th className="py-2 px-2 text-[10px] font-black uppercase tracking-widest text-slate-500">Бренд</th>
-                <th className="py-2 px-2 text-[10px] font-black uppercase tracking-widest text-slate-500 text-right">Ціна продажу (₴)</th>
-                <th className="py-2 px-2 text-[10px] font-black uppercase tracking-widest text-slate-500 text-center">Кількість</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {items.map((item, index) => (
-                <tr key={item.id} className="page-break-inside-avoid">
-                  <td className="py-2 px-2 font-bold text-slate-900 text-xs">{item.productName || 'Запчастина'}</td>
-                  <td className="py-2 px-2 font-bold text-slate-900 text-xs">{item.brand || '-'}</td>
-                  <td className="py-2 px-2 text-right font-bold text-xs text-slate-900">{formatCurrency(item.sellingPrice)}</td>
-                  <td className="py-2 px-2 text-center font-black text-xs text-slate-900">{item.quantity}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {/* Totals */}
-          <div className="flex justify-end pt-4 border-t-2 border-slate-900">
-            <div className="w-80 space-y-4">
-              <div className="flex justify-between items-center text-slate-400">
-                <span className="text-xs font-black uppercase">Кількість позицій:</span>
-                <span className="font-bold">{items.length}</span>
+          <div className="mb-6 pb-4 border-b-2 border-slate-900 flex justify-between items-start">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-black text-lg tracking-tight uppercase text-slate-900">OrderFlow</span>
+                <span className="text-xs bg-slate-900 text-white font-bold px-2 py-0.5 rounded">Автозапчастини</span>
               </div>
-              <div className="flex justify-between items-center bg-slate-900 p-4 rounded-xl text-white shadow-md">
-                <span className="text-xs font-black uppercase tracking-widest">Разом до сплати:</span>
-                <span className="text-3xl font-black">{formatCurrency(calculatedTotal)}</span>
+              <h1 className="text-2xl font-black uppercase tracking-tight text-slate-900">
+                Видаткова накладна № {order.id.slice(0, 8).toUpperCase()}
+              </h1>
+              <p className="text-xs text-slate-500 font-medium">
+                Дата оформлення: {order.createdAt?.toDate ? order.createdAt.toDate().toLocaleDateString('uk-UA') : new Date().toLocaleDateString('uk-UA')}
+              </p>
+            </div>
+            <div className="text-right text-xs space-y-1">
+              <p className="font-bold text-slate-900">Постачальник: OrderFlow Склад-Магазин</p>
+              <p className="text-slate-500">Система обліку та замовлень</p>
+              <div className="inline-block mt-1 px-2.5 py-1 bg-slate-100 rounded text-[11px] font-bold text-slate-800 border border-slate-200">
+                Статус: {order.status === 'Delivered' ? 'Виконано' : order.status === 'Processing' ? 'В обробці' : order.status === 'Cancelled' ? 'Скасовано' : order.status === 'Shipped' ? 'Відправлено' : 'Очікує'}
               </div>
             </div>
           </div>
 
+          {/* Client & Vehicle Details */}
+          <div className="grid grid-cols-2 gap-4 p-4 mb-6 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+            <div>
+              <p className="text-slate-400 font-bold uppercase text-[10px] mb-1">Одержувач / Замовник</p>
+              <p className="font-bold text-sm text-slate-900">{order.customerName}</p>
+              <p className="text-slate-600 mt-0.5 font-medium">Тел: {order.customerPhone || 'Не вказано'}</p>
+            </div>
+            <div>
+              <p className="text-slate-400 font-bold uppercase text-[10px] mb-1">Транспортний засіб</p>
+              <p className="font-bold text-slate-900">{order.carModel || 'Автомобіль не вказано'}</p>
+              <p className="text-slate-600 font-mono mt-0.5">VIN: {order.vin ? order.vin.toUpperCase() : '—'}</p>
+            </div>
+          </div>
 
+          {/* Table */}
+          <table className="w-full mb-6 text-left border-collapse text-xs">
+            <thead>
+              <tr className="border-b-2 border-t-2 border-slate-900 bg-slate-100/70">
+                <th className="py-2.5 px-2 text-[10px] font-black uppercase tracking-wider text-slate-600 text-center w-10">№</th>
+                <th className="py-2.5 px-2 text-[10px] font-black uppercase tracking-wider text-slate-600">Артикул / Код</th>
+                <th className="py-2.5 px-2 text-[10px] font-black uppercase tracking-wider text-slate-600">Найменування товару</th>
+                <th className="py-2.5 px-2 text-[10px] font-black uppercase tracking-wider text-slate-600">Бренд</th>
+                <th className="py-2.5 px-2 text-[10px] font-black uppercase tracking-wider text-slate-600 text-center">К-сть</th>
+                <th className="py-2.5 px-2 text-[10px] font-black uppercase tracking-wider text-slate-600 text-right">Ціна (₴)</th>
+                <th className="py-2.5 px-2 text-[10px] font-black uppercase tracking-wider text-slate-600 text-right">Сума (₴)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {items.length > 0 ? (
+                items.map((item, index) => {
+                  const qty = Number(String(item.quantity).replace(',', '.')) || 1;
+                  const price = Number(String(item.sellingPrice).replace(',', '.')) || 0;
+                  const sum = qty * price;
+                  return (
+                    <tr key={item.id} className="page-break-inside-avoid">
+                      <td className="py-2.5 px-2 text-center text-slate-500 font-mono">{index + 1}</td>
+                      <td className="py-2.5 px-2 font-mono font-bold text-slate-800">{item.partNumber || '—'}</td>
+                      <td className="py-2.5 px-2 font-bold text-slate-900">{item.productName || 'Запчастина'}</td>
+                      <td className="py-2.5 px-2 font-medium text-slate-700">{item.brand || '—'}</td>
+                      <td className="py-2.5 px-2 text-center font-black text-slate-900">{qty}</td>
+                      <td className="py-2.5 px-2 text-right font-medium text-slate-800">{formatCurrency(price)}</td>
+                      <td className="py-2.5 px-2 text-right font-black text-slate-900">{formatCurrency(sum)}</td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={7} className="py-4 px-2 text-center text-slate-500 italic">
+                    Позиції відсутні або розраховуються за загальною сумою
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          {/* Totals & Summary */}
+          <div className="flex justify-between items-start pt-2 border-t-2 border-slate-900 mb-8">
+            <div className="text-xs text-slate-500 space-y-1">
+              <p>Всього найменувань: <span className="font-bold text-slate-900">{items.length}</span></p>
+              <p>
+                Загальна кількість: <span className="font-bold text-slate-900">
+                  {items.reduce((acc, i) => acc + (Number(String(i.quantity).replace(',', '.')) || 0), 0)} шт.
+                </span>
+              </p>
+            </div>
+            <div className="w-72 bg-slate-900 text-white p-4 rounded-xl shadow-sm text-right">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-300 block mb-1">
+                Разом до сплати:
+              </span>
+              <span className="text-2xl font-black text-white">{formatCurrency(calculatedTotal)}</span>
+            </div>
+          </div>
+
+          {/* Signatures */}
+          <div className="pt-6 border-t border-dashed border-slate-300 grid grid-cols-2 gap-8 text-xs text-slate-600">
+            <div>
+              <p className="font-bold text-slate-800 mb-6">Відпустив (ПІБ, підпис):</p>
+              <div className="border-b border-slate-400 w-3/4 mb-1"></div>
+              <p className="text-[10px] text-slate-400">М.П. / Дата</p>
+            </div>
+            <div>
+              <p className="font-bold text-slate-800 mb-6">Отримав (ПІБ, підпис):</p>
+              <div className="border-b border-slate-400 w-3/4 mb-1"></div>
+              <p className="text-[10px] text-slate-400">Претензій до кількості та зовнішнього вигляду не маю</p>
+            </div>
+          </div>
         </div>
       </div>
     </AnimatePresence>

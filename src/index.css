@@ -15,9 +15,21 @@
 }
 @media print {
   @page {
-    margin: 0;
+    margin: 1cm;
+    size: auto;
   }
   body {
-    padding: 1.5cm;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  /* Enforce clean printer output: strictly hide navigation, headers, sidebars, modals and non-print UI */
+  header, aside, nav, .print\:hidden {
+    display: none !important;
+  }
+  .print\:block {
+    display: block !important;
   }
 }

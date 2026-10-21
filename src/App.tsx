@@ -221,7 +221,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen bg-[#F8FAFC]">
+    <div className="flex min-h-screen bg-[#F8FAFC] print:bg-white print:block">
       {/* Sidebar */}
       <motion.aside
         initial={false}
@@ -328,7 +328,7 @@ export default function App() {
 
       {/* Main Content */}
       <main className={cn(
-        "flex-1 flex flex-col transition-all duration-300 print:ml-0 print:w-full",
+        "flex-1 flex flex-col transition-all duration-300 print:ml-0 print:w-full print:block",
         isSidebarOpen ? "ml-[280px]" : "ml-[80px]"
       )}>
         {/* Header */}
@@ -412,7 +412,7 @@ export default function App() {
         </header>
 
         {/* Content Area */}
-        <div className="p-8">
+        <div className="p-8 print:p-0 print:m-0">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeView}
