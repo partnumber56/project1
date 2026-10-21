@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { 
   collection, 
   onSnapshot, 
@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Order, OrderItem, Client } from '../types';
-import { cn, formatCurrency } from '../lib/utils';
+import { cn, formatCurrency, parseSafeNumber } from '../lib/utils';
 
 interface RequestDetailsModalProps {
   request: Order | null;
@@ -107,8 +107,8 @@ export default function RequestDetailsModal({ request, onClose }: RequestDetails
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   
-  const calculatedTotal = items.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) * Number(String(i.quantity).replace(',', '.'))), 0);
-  const calculatedProfit = items.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) - Number(String(i.costPrice).replace(',', '.'))) * Number(String(i.quantity).replace(',', '.')), 0);
+  const calculatedTotal = items.reduce((acc, i) => acc + (parseSafeNumber(i.sellingPrice) * parseSafeNumber(i.quantity, 1)), 0);
+  const calculatedProfit = items.reduce((acc, i) => acc + (parseSafeNumber(i.sellingPrice) - parseSafeNumber(i.costPrice)) * parseSafeNumber(i.quantity, 1), 0);
 
   const handleCopyToGemini = () => {
     if (!request) return;
@@ -266,24 +266,45 @@ ${itemsText}
         }
       }
 
+      const validItems = items.filter(i => 
+        (i.partNumber && i.partNumber.trim()) || 
+        (i.productName && i.productName.trim()) || 
+        (i.brand && i.brand.trim()) || 
+        parseSafeNumber(i.sellingPrice) > 0
+      );
+
       await runTransaction(db, async (transaction) => {
         // 1. Create order
         const orderRef = doc(collection(db, 'orders'));
         transaction.set(orderRef, {
-          ...request, // This includes customerName, carModel, etc.
           clientId: clientId || null,
-          id: orderRef.id,
+          customerName: request.customerName,
+          customerPhone: request.customerPhone || '',
+          carModel: request.carModel || '',
+          vin: request.vin || '',
+          carYear: request.carYear || '',
+          engineVolume: request.engineVolume || '',
           status: 'Pending',
+          totalAmount: parseSafeNumber(calculatedTotal, 0),
+          totalProfit: parseSafeNumber(calculatedProfit, 0),
+          creatorId: auth.currentUser?.uid || request.creatorId || '',
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
 
         // 2. Map items
-        for (const item of items) {
+        for (const item of (validItems.length > 0 ? validItems : items)) {
           const itemRef = doc(collection(db, `orders/${orderRef.id}/items`));
-          const { id, ...itemData } = item; // Remove the old ID
           transaction.set(itemRef, {
-            ...itemData,
+            productId: item.productId || null,
+            partNumber: item.partNumber || '',
+            brand: item.brand || '',
+            productName: item.productName || item.partNumber || 'Запчастина',
+            quantity: parseSafeNumber(item.quantity, 1),
+            costPrice: parseSafeNumber(item.costPrice, 0),
+            sellingPrice: parseSafeNumber(item.sellingPrice, 0),
+            supplier: item.supplier || '',
+            deliveryTime: item.deliveryTime || '',
             status: item.status || 'Pending' 
           });
         }
@@ -295,8 +316,7 @@ ${itemsText}
 
       onClose();
     } catch (error) {
-      console.error(error);
-      alert('Помилка при перетворенні на замовлення.');
+      handleFirestoreError(error, OperationType.CREATE, 'orders');
     } finally {
       setIsProcessing(false);
     }

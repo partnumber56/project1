@@ -29,7 +29,7 @@ import {
 import { read, utils } from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product } from '../types';
-import { cn, formatCurrency, exportToCSV } from '../lib/utils';
+import { cn, formatCurrency, exportToCSV, parseSafeNumber } from '../lib/utils';
 
 export default function InventoryView() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -55,6 +55,8 @@ export default function InventoryView() {
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'products'), (snapshot) => {
       setProducts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'products');
     });
     return () => unsubscribe();
   }, []);
@@ -78,23 +80,26 @@ export default function InventoryView() {
     e.preventDefault();
     const path = 'products';
     try {
+      const stockNum = parseSafeNumber(formData.stock, 0);
+      const priceNum = parseSafeNumber(formData.price, 0);
+
       if (editingProduct) {
         await updateDoc(doc(db, path, editingProduct.id), {
           ...formData,
-          stock: Number(formData.stock),
-          price: Number(formData.price)
+          stock: stockNum,
+          price: priceNum
         });
       } else {
         await addDoc(collection(db, path), {
           ...formData,
-          stock: Number(formData.stock),
-          price: Number(formData.price),
+          stock: stockNum,
+          price: priceNum,
           createdAt: serverTimestamp()
         });
       }
       setIsModalOpen(false);
       setEditingProduct(null);
-      setFormData({ name: '', sku: '', brand: '', supplier: '', stock: '', price: '', category: '', description: '' });
+      setFormData({ name: '', sku: '', brand: '', supplier: '', stock: '', price: '', category: '', description: '', deliveryTime: '' });
     } catch (error) {
       handleFirestoreError(error, editingProduct ? OperationType.UPDATE : OperationType.CREATE, path);
     }

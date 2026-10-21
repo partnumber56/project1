@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { db } from '../firebase';
-import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { 
   FileText, 
   Download, 
@@ -10,7 +10,7 @@ import {
   Car
 } from 'lucide-react';
 import { Order } from '../types';
-import { formatCurrency, cn } from '../lib/utils';
+import { formatCurrency, cn, exportToCSV, getOrderStatusLabel } from '../lib/utils';
 
 export default function ReportsView() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -19,6 +19,8 @@ export default function ReportsView() {
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'orders'), (snapshot) => {
       setOrders(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Order)));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'orders');
     });
     return () => unsubscribe();
   }, []);
@@ -42,9 +44,25 @@ export default function ReportsView() {
     return true;
   });
 
-  const totalRevenue = filteredOrders.reduce((acc, o) => o.status !== 'Cancelled' ? acc + o.totalAmount : acc, 0);
+  const totalRevenue = filteredOrders.reduce((acc, o) => o.status !== 'Cancelled' ? acc + (o.totalAmount || 0) : acc, 0);
   const totalProfit = filteredOrders.reduce((acc, o) => o.status !== 'Cancelled' ? acc + (o.totalProfit || 0) : acc, 0);
   const averageOrder = filteredOrders.length > 0 ? totalRevenue / filteredOrders.length : 0;
+
+  const handleExport = () => {
+    const headers = ['ID', 'Дата', 'Клієнт', 'Телефон', 'Автомобіль', 'VIN', 'Сума', 'Прибуток', 'Статус'];
+    const data = filteredOrders.map(o => [
+      o.id,
+      o.createdAt?.toDate ? o.createdAt.toDate().toLocaleDateString('uk-UA') : '',
+      o.customerName,
+      o.customerPhone || '',
+      o.carModel || '',
+      o.vin || '',
+      o.totalAmount,
+      o.totalProfit || 0,
+      getOrderStatusLabel(o.status)
+    ]);
+    exportToCSV(`звіт_замовлень_${timeFilter}_${new Date().toLocaleDateString('uk-UA')}`, headers, data);
+  };
 
   return (
     <div className="space-y-8">
@@ -68,9 +86,12 @@ export default function ReportsView() {
               <option value="month">Цей місяць</option>
             </select>
           </div>
-          <button className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-slate-800 transition-all">
+          <button 
+            onClick={handleExport}
+            className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-xl font-bold text-sm hover:bg-slate-800 transition-all shadow-sm active:scale-95"
+          >
             <Download className="w-4 h-4" />
-            Експорт
+            Експорт CSV
           </button>
         </div>
       </div>
@@ -153,9 +174,11 @@ export default function ReportsView() {
                       <span className={cn(
                         "px-3 py-1 rounded-full text-[10px] font-black uppercase border",
                         order.status === 'Delivered' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 
-                        order.status === 'Cancelled' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-100 text-slate-600 border-slate-200'
+                        order.status === 'Processing' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                        order.status === 'Shipped' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                        order.status === 'Cancelled' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-amber-50 text-amber-700 border-amber-200'
                       )}>
-                        {order.status}
+                        {getOrderStatusLabel(order.status)}
                       </span>
                     </div>
                   </td>

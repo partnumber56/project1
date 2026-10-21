@@ -34,7 +34,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Order, OrderStatus, OrderItem, ItemStatus, Client } from '../types';
-import { cn, formatCurrency } from '../lib/utils';
+import { cn, formatCurrency, parseSafeNumber } from '../lib/utils';
 
 interface OrderDetailsModalProps {
   order: Order | null;
@@ -108,8 +108,8 @@ export default function OrderDetailsModal({ order, onClose, userRole }: OrderDet
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   
-  const calculatedTotal = items.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) * Number(String(i.quantity).replace(',', '.'))), 0);
-  const calculatedProfit = items.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) - Number(String(i.costPrice).replace(',', '.'))) * Number(String(i.quantity).replace(',', '.')), 0);
+  const calculatedTotal = items.reduce((acc, i) => acc + (parseSafeNumber(i.sellingPrice) * parseSafeNumber(i.quantity, 1)), 0);
+  const calculatedProfit = items.reduce((acc, i) => acc + (parseSafeNumber(i.sellingPrice) - parseSafeNumber(i.costPrice)) * parseSafeNumber(i.quantity, 1), 0);
 
   const handleCopyToGemini = () => {
     if (!order) return;
@@ -193,7 +193,20 @@ ${itemsText}
               const productSnap = await transaction.get(productRef);
               if (productSnap.exists()) {
                 const currentStock = productSnap.data().stock || 0;
-                const newStock = Math.max(0, currentStock - Number(String(item.quantity).replace(',', '.')));
+                const newStock = Math.max(0, currentStock - parseSafeNumber(item.quantity, 1));
+                transaction.update(productRef, { stock: newStock });
+              }
+            }
+          }
+        } else if (currentOrder.status === 'Delivered' && newStatus !== 'Delivered') {
+          // Restore inventory stock if order is reverted from Delivered
+          for (const item of items) {
+            if (item.productId) {
+              const productRef = doc(db, 'products', item.productId);
+              const productSnap = await transaction.get(productRef);
+              if (productSnap.exists()) {
+                const currentStock = productSnap.data().stock || 0;
+                const newStock = currentStock + parseSafeNumber(item.quantity, 1);
                 transaction.update(productRef, { stock: newStock });
               }
             }
@@ -201,6 +214,7 @@ ${itemsText}
         }
 
         // Handle Financial logic when Delivered
+        const safeTotal = parseSafeNumber(calculatedTotal, 0);
         if (newStatus === 'Delivered' && !currentOrder.isFinancialProcessed) {
           if (currentOrder.clientId) {
             const clientRef = doc(db, 'clients', currentOrder.clientId);
@@ -208,14 +222,14 @@ ${itemsText}
             if (clientSnap.exists()) {
               const clientData = clientSnap.data();
               transaction.update(clientRef, {
-                balance: (clientData.balance || 0) - (calculatedTotal || 0),
-                totalTurnover: (clientData.totalTurnover || 0) + (calculatedTotal || 0)
+                balance: (clientData.balance || 0) - safeTotal,
+                totalTurnover: (clientData.totalTurnover || 0) + safeTotal
               });
 
               const txRef = doc(collection(db, `clients/${currentOrder.clientId}/transactions`));
               transaction.set(txRef, {
                 clientId: currentOrder.clientId,
-                amount: -(calculatedTotal || 0),
+                amount: -safeTotal,
                 type: 'Order',
                 description: `Замовлення #${order.id}`,
                 orderId: order.id,
@@ -232,14 +246,14 @@ ${itemsText}
             if (clientSnap.exists()) {
               const clientData = clientSnap.data();
               transaction.update(clientRef, {
-                balance: (clientData.balance || 0) + (calculatedTotal || 0),
-                totalTurnover: (clientData.totalTurnover || 0) - (calculatedTotal || 0)
+                balance: (clientData.balance || 0) + safeTotal,
+                totalTurnover: Math.max(0, (clientData.totalTurnover || 0) - safeTotal)
               });
 
               const txRef = doc(collection(db, `clients/${currentOrder.clientId}/transactions`));
               transaction.set(txRef, {
                 clientId: currentOrder.clientId,
-                amount: (calculatedTotal || 0),
+                amount: safeTotal,
                 type: 'Refund',
                 description: `Скасування статусу (Повернення) #${order.id}`,
                 orderId: order.id,
@@ -304,10 +318,8 @@ ${itemsText}
   const updateItemField = async (itemId: string, field: string, value: any) => {
     if (!order) return;
     
-    // Optimistic calculation for parent order
-    // Allow empty string for UI convenience, but treat as 0 for calculations
     const val = field.includes('Price') || field === 'quantity' 
-      ? (value === '' ? 0 : Number(String(value).replace(',', '.'))) 
+      ? (value === '' ? '' : parseSafeNumber(value)) 
       : value;
     
     const currentItem = items.find(i => i.id === itemId);
@@ -322,8 +334,8 @@ ${itemsText}
 
       // Recalculate totals using the latest available items state
       const updatedItems = items.map(i => i.id === itemId ? { ...i, [field]: val } : i);
-      const totalAmount = updatedItems.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) * Number(String(i.quantity).replace(',', '.'))), 0);
-      const totalProfit = updatedItems.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) - Number(String(i.costPrice).replace(',', '.'))) * Number(String(i.quantity).replace(',', '.')), 0);
+      const totalAmount = updatedItems.reduce((acc, i) => acc + (parseSafeNumber(i.sellingPrice) * parseSafeNumber(i.quantity, 1)), 0);
+      const totalProfit = updatedItems.reduce((acc, i) => acc + (parseSafeNumber(i.sellingPrice) - parseSafeNumber(i.costPrice)) * parseSafeNumber(i.quantity, 1), 0);
 
       await updateDoc(doc(db, 'orders', order.id), {
         totalAmount,
@@ -331,7 +343,6 @@ ${itemsText}
         updatedAt: serverTimestamp()
       });
     } catch (error: any) {
-      // If document was not found, it means it was deleted by another process/tab
       if (error?.code === 'not-found' || error?.message?.includes('No document to update')) {
         console.warn('Item not found, possibly already deleted:', itemId);
         return;
@@ -353,6 +364,7 @@ ${itemsText}
           costPrice: '',
           sellingPrice: '',
           supplier: '',
+          deliveryTime: '',
           status: 'Pending'
         });
       });
@@ -368,8 +380,8 @@ ${itemsText}
       await deleteDoc(doc(db, `orders/${order.id}/items`, itemId));
       
       const updatedItems = items.filter(i => i.id !== itemId);
-      const totalAmount = updatedItems.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) * Number(String(i.quantity).replace(',', '.'))), 0);
-      const totalProfit = updatedItems.reduce((acc, i) => acc + (Number(String(i.sellingPrice).replace(',', '.')) - Number(String(i.costPrice).replace(',', '.'))) * Number(String(i.quantity).replace(',', '.')), 0);
+      const totalAmount = updatedItems.reduce((acc, i) => acc + (parseSafeNumber(i.sellingPrice) * parseSafeNumber(i.quantity, 1)), 0);
+      const totalProfit = updatedItems.reduce((acc, i) => acc + (parseSafeNumber(i.sellingPrice) - parseSafeNumber(i.costPrice)) * parseSafeNumber(i.quantity, 1), 0);
 
       await updateDoc(doc(db, 'orders', order.id), {
         totalAmount,

@@ -77,7 +77,7 @@ service cloud.firestore {
              data.quantity is number && data.quantity > 0 &&
              (data.get('costPrice', 0) is number || data.get('costPrice', '') == '') &&
              (data.get('sellingPrice', 0) is number || data.get('sellingPrice', '') == '') &&
-             data.status in ['Pending', 'Ordered', 'Available', 'Out of Stock', 'Picked', 'Packed', 'Issued'];
+             data.status in ['Pending', 'Ordered', 'In Transit', 'Available', 'Out of Stock', 'Picked', 'Packed', 'Confirmed', 'Issued'];
     }
 
     match /{path=**}/items/{itemId} {
@@ -98,6 +98,7 @@ service cloud.firestore {
              data.amount is number &&
              data.type in ['Payment', 'Refund', 'Order', 'Adjustment'] &&
              data.description is string &&
+             (data.get('orderId', '') is string) &&
              data.createdAt == request.time;
     }
 
@@ -121,11 +122,11 @@ service cloud.firestore {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && isValidOrder(incoming());
       allow update: if isSignedIn() && (
-        (incoming().diff(existing()).affectedKeys().hasOnly([
+        incoming().diff(existing()).affectedKeys().hasOnly([
           'status', 'updatedAt', 'customerName', 'customerPhone', 'customerEmail', 
           'totalAmount', 'totalProfit', 'clientId', 'isFinancialProcessed',
           'carModel', 'vin', 'carYear', 'engineVolume'
-        ]) && incoming().updatedAt == request.time) ||
+        ]) ||
         isAdmin()
       );
       allow delete: if isAdmin();

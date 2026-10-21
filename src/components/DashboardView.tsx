@@ -1,5 +1,5 @@
 import { useEffect, useState, ReactNode } from 'react';
-import { db } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { 
   TrendingUp, 
@@ -24,7 +24,7 @@ import {
   Cell
 } from 'recharts';
 import { motion } from 'motion/react';
-import { formatCurrency, cn } from '../lib/utils';
+import { formatCurrency, cn, getOrderStatusLabel } from '../lib/utils';
 import { Order, Product } from '../types';
 
 export default function DashboardView() {
@@ -78,6 +78,8 @@ export default function DashboardView() {
         return { name: dayLabel, value: daySales };
       });
       setChartData(processedChartData);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'orders');
     });
 
     const unsubProducts = onSnapshot(collection(db, 'products'), (snapshot) => {
@@ -87,6 +89,8 @@ export default function DashboardView() {
         ...prev,
         lowStockCount: productData.filter(p => (p.stock || 0) <= 5).length
       }));
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'products');
     });
 
     return () => {
@@ -211,7 +215,7 @@ export default function DashboardView() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-slate-800 truncate">{order.customerName}</p>
                     <div className="flex items-center gap-2">
-                       <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">{order.status}</p>
+                       <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">{getOrderStatusLabel(order.status)}</p>
                        <span className="text-[10px] text-slate-300">•</span>
                        <p className="text-[10px] text-slate-400 font-bold">{order.createdAt?.toDate ? order.createdAt.toDate().toLocaleDateString('uk-UA') : ''}</p>
                     </div>

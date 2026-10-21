@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Client, FinancialTransaction } from '../types';
-import { cn, formatCurrency } from '../lib/utils';
+import { cn, formatCurrency, parseSafeNumber } from '../lib/utils';
 
 export default function FinanceView({ userRole }: { userRole?: string | null }) {
   const [clients, setClients] = useState<Client[]>([]);
@@ -102,9 +102,12 @@ export default function FinanceView({ userRole }: { userRole?: string | null }) 
   };
 
   const handleAddTransaction = async () => {
-    if (!selectedClient || !txAmount || isNaN(parseFloat(txAmount))) return;
+    const amount = parseSafeNumber(txAmount, 0);
+    if (!selectedClient || amount <= 0) {
+      alert('Будь ласка, вкажіть коректну суму більше 0.');
+      return;
+    }
 
-    const amount = parseFloat(txAmount);
     // For Payment: balance increases (client gave us money)
     // For Refund: balance decreases (we gave client money back)
     const balanceEffect = txType === 'Payment' ? amount : -amount;
@@ -117,7 +120,6 @@ export default function FinanceView({ userRole }: { userRole?: string | null }) 
         if (!clientSnap.exists()) throw new Error('Client not found');
         
         const currentBalance = clientSnap.data().balance || 0;
-        const currentTurnover = clientSnap.data().totalTurnover || 0;
 
         // Create transaction
         const txRef = doc(collection(db, `clients/${selectedClient.id}/transactions`));
@@ -125,16 +127,13 @@ export default function FinanceView({ userRole }: { userRole?: string | null }) 
           clientId: selectedClient.id,
           amount: txType === 'Payment' ? amount : -amount,
           type: txType,
-          description: txDesc || (txType === 'Payment' ? 'Оплата' : 'Повернення'),
+          description: txDesc || (txType === 'Payment' ? 'Оплата' : txType === 'Refund' ? 'Повернення' : 'Коригування'),
           createdAt: serverTimestamp()
         });
 
         // Update client
         transaction.update(clientRef, {
           balance: currentBalance + balanceEffect,
-          // Turnover only increases if it's a payment? 
-          // Usually turnover is the sum of orders. 
-          // Let's just track balance correctly.
         });
       });
 
@@ -142,8 +141,7 @@ export default function FinanceView({ userRole }: { userRole?: string | null }) 
       setTxAmount('');
       setTxDesc('');
     } catch (error) {
-       console.error(error);
-       alert('Помилка при збереженні транзакції');
+       handleFirestoreError(error, OperationType.CREATE, `clients/${selectedClient?.id}/transactions`);
     }
   };
 
